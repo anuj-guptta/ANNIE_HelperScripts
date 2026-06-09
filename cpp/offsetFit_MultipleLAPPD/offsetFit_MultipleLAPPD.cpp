@@ -19,7 +19,7 @@ Usage           : root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 14, 
 		  root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 47, 0, 10, 0)' // for laser runs
 		  Please refer to README.md for additional details.
 
-Dependencies    : ROOT, ToolAnalysis
+Dependencies    : ROOT
 ==================================================
 */
 
