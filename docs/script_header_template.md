@@ -24,7 +24,7 @@ Dependencies 	: 	<List all Python packages used with versions>
 """
 ```
 
-// C++ Script Header Template
+# C++ Script Header Template
 
 ```cpp
 /*
