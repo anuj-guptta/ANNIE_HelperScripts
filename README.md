@@ -24,7 +24,7 @@ Please note that ToolAnalysis remains the primary software framework for ANNIE. 
 | --------- | ------------------------------------------------------- |
 | `cpp/`    | C++ analysis and utility scripts                        |
 | `python/` | Python analysis and utility scripts                     |
-| `docs/`   | Repository documentation, templates, and script catalog |
+| `docs/`   | Script catalog and templates                            |
 
 ## Documentation Standards
 
