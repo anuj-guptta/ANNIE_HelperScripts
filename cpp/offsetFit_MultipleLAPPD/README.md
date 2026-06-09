@@ -19,15 +19,18 @@ This script performs LAPPD timing offset fitting and takes `LAPPDTree.root` (pro
       * Data timestamp
       * Data beamgate
       * PPS for Board 0 and Board 1
+        
    b. Loop over the `Trig` (or `GTrig`) tree and load:
 
       * CTC PPS (Trigger Word = 32)
       * Target trigger word
+        
 5. Find the number of resets in the LAPPD PPS stream:
 
    * There must be at least one event in each reset.
    * Based on the event index order, only fit before the reset that does not contain a data event.
    * Save the data event and PPS index ordering.
+     
 6. Use the target trigger word to perform the offset fit.
 7. Save the offset for:
 
@@ -36,6 +39,7 @@ This script performs LAPPD timing offset fitting and takes `LAPPDTree.root` (pro
    * Part File Number
    * Event Index
    * Reset Number
+     
 8. Print information to output files.
 
 ## Input Arguments
