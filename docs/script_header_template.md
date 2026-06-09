@@ -1,5 +1,6 @@
 # Python Script Header Template
 
+```python
 """
 ==================================================
 Script Name 	:
@@ -18,14 +19,14 @@ Outputs		:	<What is produced?>
 Usage		:	<How to execute the script?>
 
 Dependencies 	: 	<List all Python packages used with versions>
-					Example: numpy 1.26.0, uproot 5.3.0, etc.
-					
+					Example: numpy 1.26.0, uproot 5.3.0, etc.			
 ==================================================
 """
-
+```
 
 // C++ Script Header Template
 
+```cpp
 /*
 ==================================================
 Script Name	:
@@ -42,6 +43,6 @@ Outputs		:	<What is produced?>
 Usage		:	<How to execute the script?>
 
 Dependencies    : 	<ROOT, ToolAnalysis, Boost, etc.>
-
 ==================================================
 */
+```
