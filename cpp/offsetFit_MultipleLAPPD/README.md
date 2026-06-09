@@ -92,7 +92,7 @@ root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 14, 1, 10, 0)'
 root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 47, 0, 10, 0)'
 ```
 
-#### Runs ≥ 5140 (except Run 6139)
+#### Runs ≥ 5140
 
 ```bash
 root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 47, 0, 5, 0)'
