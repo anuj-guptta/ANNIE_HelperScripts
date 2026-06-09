@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+
+# C++ build artifacts
+*.o
+*.out
+*.exe
+
+# ROOT / analysis outputs
+*.root
+
+# ROOT dictionary files
+*.pcm
+*Dict.cxx
+*Dict.h
+
+# Libraries
+*.a
+*.so
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Automatic dependency files
+*.d
+
+# Core dumps
+core*
+
+# Editor backup files
+*~
+\#*#
