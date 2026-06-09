@@ -26,23 +26,6 @@ Please note that ToolAnalysis remains the primary software framework for ANNIE. 
 | `python/` | Python analysis and utility scripts                     |
 | `docs/`   | Script catalog and templates                            |
 
-## Documentation Standards
-
-Each script directory should contain:
-
-* The script source code.
-* A dedicated `README.md`.
-* A standardized script header.
-
-Templates are available in:
-
-* `docs/script_header_template.md`
-
-## Script Catalog
-
-A catalog of all documented scripts can be found in:
-
-* `docs/script_catalog.md`
 
 ## Repository Guidelines
 
