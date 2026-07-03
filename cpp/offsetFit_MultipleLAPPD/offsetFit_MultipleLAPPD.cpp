@@ -4,20 +4,20 @@ Script Name     : offsetFit_MultipleLAPPD.cpp
 Author          : Yue Feng
 Created On      : N/A
 Updated By      : Anuj Gupta
-Last Updated    : 2026-06-09
+Last Updated    : 2026-07-03
 
 Purpose         : The script performs LAPPD timing offset fitting and timing corrections.
-		  Detailed procedure is described in README.md
+                  Detailed procedure is described in README.md
 
 Inputs          : It takes 5 arguments as input.
-		  filename: LAPPDTree.root, fitTargetTriggerWord, triggerGrouped, intervalInSeconds, processPfNumber
+                  filename: LAPPDTree.root, fitTargetTriggerWord, triggerGrouped, intervalInSeconds, processPfNumber
 
 Outputs         : Produces offsetFitResult.root (used during Event Building)
-		  Other outputs: offsetFit.txt, outputEvents.txt
+                  Other outputs: offsetFit.txt, outputEvents.txt
 
 Usage           : root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 14, 1, 10, 0)' // for beam runs
-		  root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 47, 0, 10, 0)' // for laser runs
-		  Please refer to README.md for additional details.
+                  root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 47, 0, 10, 0)' // for laser runs
+                  Please refer to README.md for additional details.
 
 Dependencies    : ROOT
 ==================================================
@@ -42,74 +42,84 @@ vector<vector<ULong64_t>> fitInThisReset(
     const int fitTargetTriggerWord,
     const std::vector<ULong64_t> &CTCTrigger,
     const std::vector<ULong64_t> &CTCPPS,
-    const ULong64_t PPSDeltaT,
+    const ULong64_t PPSDeltaT, // here, pre-scale is in units ps
     const int partFileNumber,
     const int ACDCNumber)
 {
-    cout << "***************************************" << endl;
-    cout << "Fitting part file number: " << partFileNumber << ", ACDC number: " << ACDCNumber << endl;
-    cout << "Fitting in this reset with:" << endl;
-    cout << "LAPPDDataTimeStampUL size: " << LAPPDDataTimeStampUL.size() << endl;
-    cout << "LAPPDDataBeamgateUL size: " << LAPPDDataBeamgateUL.size() << endl;
-    cout << "LAPPD_PPS size: " << LAPPD_PPS.size() << endl;
-    cout << "CTCTrigger size: " << CTCTrigger.size() << endl;
-    cout << "CTCPPS size: " << CTCPPS.size() << endl;
-    cout << "PPSDeltaT: " << PPSDeltaT << endl; // in ps
-    // for this input PPS, fit an offset
-    // return the offset and other information in order
-    // precedure:
-    // 1. check drift
-    // 2. shift the timestmap and beamgate based on drift
-    // 3. fit the offset
+    std::cout << "***************************************" << endl;
+    std::cout << "Fitting part file number: " << partFileNumber << ", ACDC number: " << ACDCNumber << std::endl;
+    std::cout << "Fitting in this reset with:" << std::endl;
+    std::cout << "LAPPDDataTimeStampUL size: " << LAPPDDataTimeStampUL.size() << std::endl;
+    std::cout << "LAPPDDataBeamgateUL size: " << LAPPDDataBeamgateUL.size() << std::endl;
+    std::cout << "LAPPD_PPS size: " << LAPPD_PPS.size() << std::endl;
+    std::cout << "CTCTrigger size: " << CTCTrigger.size() << std::endl;
+    std::cout << "CTCPPS size: " << CTCPPS.size() << std::endl;
+    std::cout << "PPSDeltaT (us): " << PPSDeltaT / 1E6 << std::endl;
+    
+    // For this input PPS, fit an offset
+    // Return the offset and other information in order
+    // Precedure:
+    	// 1. Check the drift
+    	// 2. Shift the timestamp and beamgate based on drift
+    	// 3. Fit the offset
 
     std::vector<double> PPSInterval_ACDC;
-
-    for (int i = 1; i < LAPPD_PPS.size(); i++)
+    for (size_t i = 1; i < LAPPD_PPS.size(); i++)
     {
+	// This condition is already checked before calling this function.
+	// I am adding this condition here again for debugging purpose.
+	if (LAPPD_PPS[i] < LAPPD_PPS[i - 1]) {
+		std::cout << "WARNING: unexpected PPS ordering violation in "
+             		<< "part file " << partFileNumber
+             		<< ", ACDC " << ACDCNumber
+             		<< ", index " << i << std::endl;
+		continue;
+	}
 
         double diff = static_cast<double>(LAPPD_PPS[i] - LAPPD_PPS[i - 1]);
-        cout<<fixed<<"PPSDiff = "<<diff<<endl;
-        // cout << "LAPPD_PPS[" << i << "]: " << LAPPD_PPS[i] / 1E9 / 1000 << ", diff is " << diff / 1E9 / 1000 << endl;
-        //  cout << "diff: " << diff/1E9 << ", 0.9*deltaT = " << 0.9 * PPSDeltaT/1E9 << ", 1.1*deltaT = " << 1.1 * PPSDeltaT/1E9 << endl;
-        // only save the time interval that is close to the deltaT, to avoid the clock tick level miss and the whole PPS pulse was missed.
+	std::cout << fixed << "PPSDiff (us) = " << diff / 1E6 << std::endl;
+        
+	// only save the time interval that is close to the deltaT, to avoid the clock tick level miss and the whole PPS pulse was missed.
         if (diff > 0.9 * PPSDeltaT && diff < 1.1 * PPSDeltaT)
         {
-            PPSInterval_ACDC.push_back((PPSDeltaT - diff) / 1000 / 1000);
-            cout << "push back interval in us = " << (PPSDeltaT - diff) / 1000 / 1000 << ", 0.9*PPSdeltaT = " << 0.9 * PPSDeltaT / 1E9 << ", 1.1*PPSdeltaT = " << 1.1 * PPSDeltaT / 1E9 << endl;
+            PPSInterval_ACDC.push_back((PPSDeltaT - diff) / 1E6); // in microseconds
+            std::cout << "push back interval (us) = " << (PPSDeltaT - diff) / 1E6 
+		    << ", 0.9*PPSdeltaT  = " << 0.9 * PPSDeltaT / 1E6 
+		    << ", 1.1*PPSdeltaT = " << 1.1 * PPSDeltaT / 1E6 << std::endl;
         }
         else
         {
-            cout << "0.9*PPSdeltaT = " << 0.9 * PPSDeltaT / 1E9 << ", 1.1*PPSdeltaT = " << 1.1 * PPSDeltaT / 1E9 << ", diff = " << (PPSDeltaT - diff) / 1000 / 1000 << endl;
+		std::cout << "In units of us, 0.9*PPSdeltaT = " << 0.9 * PPSDeltaT / 1E6 
+		    << ", 1.1*PPSdeltaT = " << 1.1 * PPSDeltaT / 1E6
+		    << ", PPSDeltaT - diff = " << (PPSDeltaT - diff) / 1E6 << std::endl;
         }
-        //cout << "Diff of Interval to deltaT in second is " << (PPSDeltaT - diff) / 1000 / 1E9 << endl;
     }
-    int totalPPS = LAPPD_PPS.size();
-    int driftedPPS = 0;
-
+    
     TH1D *h = new TH1D("h", "h", 1000, 0, 1E3);
-    for (int i = 0; i < PPSInterval_ACDC.size(); i++)
+    for (size_t i = 0; i < PPSInterval_ACDC.size(); i++)
     {
         // only fill the drift histogram if there is a drift > 2 microseconds
-        cout<<"PPSInterval_ACDC["<<i<<"] = "<<PPSInterval_ACDC[i]<<endl;
-        if (PPSInterval_ACDC[i] > 2)
+	std::cout << "PPSInterval_ACDC[" << i << "] = " << PPSInterval_ACDC[i] << std::endl;
+        if (PPSInterval_ACDC[i] > 2) 
         {
             h->Fill(PPSInterval_ACDC[i]); // fill in microseconds
-            cout << "Fill histogram: PPSInterval_ACDC[" << i << "]: " << PPSInterval_ACDC[i] << endl;
+	    std::cout << "Fill histogram: PPSInterval_ACDC[" << i << "]: " << PPSInterval_ACDC[i] << std::endl;
         }
     }
 
     TF1 *gausf = new TF1("gausf", "gaus", 0, 1E3);
-    h->Fit(gausf, "Q");                                                           // Q for quiet mode
-    ULong64_t drift = static_cast<ULong64_t>(gausf->GetParameter(1) * 1E3 * 1E3); // drift in ps
+    h->Fit(gausf, "Q"); // Q for quiet mode
+    
+    ULong64_t drift = static_cast<ULong64_t>(gausf->GetParameter(1) * 1E6); // drift in ps
     ULong64_t trueInterval = PPSDeltaT - drift;
     std::cout << "Gaussian Drift in ps is " << drift << std::endl;
     std::cout << "True PPS interval in ps is " << trueInterval << std::endl;
     delete gausf;
     delete h;
-    // initialize variables need for fitting
-    int orphanCount = 0; // count the number that how many data event timestamp doesn't matched to a target trigger within an interval.
+
     std::map<double, std::vector<vector<int>>> DerivationMap;
-    cout << "LAPPD_PPS.size() " << LAPPD_PPS.size() << " CTCPPS.size() " << CTCPPS.size() << endl;
+    std::cout << "LAPPD_PPS.size() " << LAPPD_PPS.size() << ", CTCPPS.size() " << CTCPPS.size() << std::endl;
+    
     for (int i = 0; i < LAPPD_PPS.size(); i++)
     {
         if (i > 5)
@@ -117,14 +127,16 @@ vector<vector<ULong64_t>> fitInThisReset(
             if (i % static_cast<int>(LAPPD_PPS.size() / 5) == 0)
                 cout << "Fitting PPS " << i << " of " << LAPPD_PPS.size() << endl;
         }
-        ULong64_t LAPPD_PPS_ns = LAPPD_PPS.at(i) / 1000;
+
+        ULong64_t LAPPD_PPS_ns = LAPPD_PPS.at(i) / 1000; // ns units
         ULong64_t LAPPD_PPS_truncated_ps = LAPPD_PPS.at(i) % 1000;
 
+	// CTCPPS are in ns units
         for (int j = 0; j < CTCPPS.size(); j++)
         {
-
             vector<double> diffSum;
             ULong64_t offsetNow_ns = 0;
+
             if (drift == 0)
             {
                 offsetNow_ns = CTCPPS.at(j) - LAPPD_PPS_ns;
@@ -132,20 +144,31 @@ vector<vector<ULong64_t>> fitInThisReset(
             else
             {
                 double LAPPD_PPS_ns_dd = static_cast<double>(LAPPD_PPS_ns);
-                double driftScaling = LAPPD_PPS_ns_dd / (trueInterval / 1000);
-                ULong64_t totalDriftedClock = static_cast<ULong64_t>(drift * driftScaling / 1000);
+                double driftScaling = LAPPD_PPS_ns_dd / (trueInterval * 1.0 / 1000);
+                ULong64_t totalDriftedClock = static_cast<ULong64_t>(static_cast<double>(drift) * driftScaling / 1000);
                 offsetNow_ns = CTCPPS.at(j) - (LAPPD_PPS_ns + totalDriftedClock);
-                if (i < 3 && j < 3)
-                    cout<<"totalDriftedClock in ns = "<<driftScaling <<" number of interval * "<<drift/1000 <<" ns drift per interval = "<<totalDriftedClock<<" ns."<<endl;
-            }
+                
+		if (i < 3 && j < 3) {
+		    std::cout << "LAPPD_PPS_ns = " << LAPPD_PPS_ns
+     		    	<< ", trueInterval(ns) = " << trueInterval/1000
+     			<< ", elapsed_interval = " << driftScaling
+     			<< ", drift_per_interval(ns) = " << drift/1000
+     			<< ", totalDriftedClock(ns) = " << totalDriftedClock << std::endl;
+		}
+	    }
 
-            if (i < 3 && j < 3)
-                cout << "In ns: CTCPPS.at(" << j << "): " << CTCPPS.at(j) << ", LAPPD_PPS.at(" << i << "): " << LAPPD_PPS.at(i) << ", use LAPPD_PPS_ns: " << LAPPD_PPS_ns << ", offsetNow_ns: " << offsetNow_ns << endl;
+            if (i < 3 && j < 3) {
+                std::cout << "In ns: CTCPPS.at(" << j << "): " << CTCPPS.at(j) 
+			<< ", LAPPD_PPS.at(" << i << "): " << LAPPD_PPS.at(i) 
+			<< ", use LAPPD_PPS_ns: " << LAPPD_PPS_ns 
+			<< ", offsetNow_ns: " << offsetNow_ns << std::endl;
+	    }
 
             // now, we have offset in ns.
-            // We do fit in ns level, then save the previse information in ps level.
+            // We do fit in ns level, then save the precise information in ps level.
 
-            orphanCount = 0;
+   	    // count the number that how many data event timestamp doesn't matched to a target trigger within an interval.
+            int orphanCount = 0;
             vector<int> notOrphanIndex;
             vector<int> ctcPairedIndex;
             vector<int> ctcOrphanPairedIndex;
@@ -154,7 +177,8 @@ vector<vector<ULong64_t>> fitInThisReset(
             {
                 ULong64_t TS_ns = LAPPDDataTimeStampUL.at(lappdb) / 1000;
                 ULong64_t TS_truncated_ps = LAPPDDataTimeStampUL.at(lappdb) % 1000;
-                // if fit for the undelayed beam trigger, use BG
+                
+		// if fit for the undelayed beam trigger (14), use Beamgate
                 if (fitTargetTriggerWord == 14)
                 {
                     TS_ns = LAPPDDataBeamgateUL.at(lappdb) / 1000;
@@ -165,31 +189,40 @@ vector<vector<ULong64_t>> fitInThisReset(
                 if (drift != 0)
                 {
                     double TS_ns_dd = static_cast<double>(TS_ns);
-                    double driftScaling = TS_ns_dd / (trueInterval / 1000);
-                    driftCorrectionForTS = static_cast<ULong64_t>(drift * driftScaling / 1000);
-                    if(lappdb<3 && i<3 && j<3)
-                        cout<<i<<j<<lappdb<<": driftCorrectionForTS = "<<driftScaling <<" number of interval * "<<drift/1000 <<" ns drift per interval = "<<driftCorrectionForTS<<" ns."<<endl;
-                }
-
+                    double driftScaling = TS_ns_dd / (trueInterval * 1.0 / 1000);
+                    driftCorrectionForTS = static_cast<ULong64_t>(static_cast<double>(drift) * driftScaling / 1000);
+                    
+		    if (lappdb<3 && i<3 && j<3) {
+			    std::cout << "i = " << i
+     				<< ", j = " << j
+     				<< ", lappdb = " << lappdb
+     				<< ", elapsed_interval = " << driftScaling
+     				<< ", drift_per_interval(ns) = " << drift/1000
+     				<< ", driftCorrectionForTS(ns) = " << driftCorrectionForTS << std::endl;
+		    }
+		}
 
                 // this is the TS we use for matching
                 ULong64_t DriftCorrectedTS_ns = TS_ns + offsetNow_ns + driftCorrectionForTS;
+		if (lappdb < 3 && i < 3 && j < 3)
+		{
+			std::cout << "LAPPD Timestamp used for matching: " << DriftCorrectedTS_ns << std::endl;
+		}
 
                 // initialise other matching variables
-                ULong64_t minMatchDiff = std::numeric_limits<ULong64_t>::max();
-                bool useThisValue = true;
+                Long64_t minMatchDiff = std::numeric_limits<Long64_t>::max();
                 int minPairIndex = 0;
                 string reason = "none";
-                Long64_t first_derivation = 0;
-                int minIndex = 0;
-                double useValue = true;
+                Long64_t firstDiff = 0;
+                bool useValue = true;
 
                 // find the best match of target trigger to this TS, in ns level.
                 for (int ctcb = 0; ctcb < CTCTrigger.size(); ctcb++)
                 {
                     ULong64_t CTCTrigger_ns = CTCTrigger.at(ctcb);
-                    Long64_t diff = CTCTrigger_ns - DriftCorrectedTS_ns;
-                    if (diff < 0)
+                    Long64_t diff = static_cast<Long64_t>(CTCTrigger_ns) - static_cast<Long64_t>(DriftCorrectedTS_ns);
+                    
+		    if (diff < 0)
                         diff = -diff;
 
                     if (diff < minMatchDiff)
@@ -201,31 +234,38 @@ vector<vector<ULong64_t>> fitInThisReset(
                     Long64_t LastBound = diff - minMatchDiff;
                     if (LastBound < 0)
                         LastBound = -LastBound;
-                    Long64_t FirstBound = diff - first_derivation;
+                    Long64_t FirstBound = diff - firstDiff;
                     if (FirstBound < 0)
                         FirstBound = -FirstBound;
 
                     // save the dt for the first matching to determin the matching position in range.
                     if (ctcb == 0)
-                        first_derivation = diff;
+                        firstDiff = diff;
 
                     if (ctcb == CTCTrigger.size() - 1 && LastBound / 1E9 < 0.01)
                     {
                         useValue = false;
-                        reason = "When matching the last TS, this diff is too close to (or even is) the minMatchDiff at index " + std::to_string(minPairIndex) + " in " + std::to_string(CTCTrigger.size()) + ". All LAPPD TS is out of the end of CTC trigger range";
+                        reason = "When matching the last TS, this diff is too close to (or even is) the minMatchDiff at index " 
+				+ std::to_string(minPairIndex) + " in " + std::to_string(CTCTrigger.size()) 
+				+ ". All LAPPD TS is out of the end of CTC trigger range";
                     }
                     if (ctcb == CTCTrigger.size() - 1 && FirstBound / 1E9 < 0.01)
                     {
                         useValue = false;
-                        reason = "When matching the last TS, this diff is too close to (or even is) the first_derivation at index " + std::to_string(minPairIndex) + " in " + std::to_string(CTCTrigger.size()) + ". All LAPPD TS is out of the beginning of CTC trigger range";
+                        reason = "When matching the last TS, this diff is too close to (or even is) the firstDiff at index " 
+				+ std::to_string(minPairIndex) + " in " + std::to_string(CTCTrigger.size()) 
+				+ ". All LAPPD TS is out of the beginning of CTC trigger range";
                     }
                 }
 
                 if (useValue)
                 {
                     diffSum.push_back(minMatchDiff);
-                    //cout<<"LAPPD PPS "<<i << "= "<<LAPPD_PPS.at(i)<<" ps, CTC PPS "<<j<<" = "<<CTCPPS.at(j)<<"ns , LAPPDDataBeamgateUL["<<lappdb<<"] = "<<LAPPDDataBeamgateUL[lappdb]<<" ps, CTCTrigger["<<minPairIndex<<"] = "<<CTCTrigger[minPairIndex]<<" ns, minMatchDiff = "<<minMatchDiff<<" ns"<<endl;
-                    double minAllowedDiff = 0;
+                    // std::cout << "LAPPD PPS " << i << " = " << LAPPD_PPS.at(i) 
+		    	// << " ps, CTC PPS " << j << " = " << CTCPPS.at(j)  << " ns , LAPPDDataBeamgateUL[" << lappdb << "] = " << LAPPDDataBeamgateUL[lappdb]
+			// <<" ps, CTCTrigger[" << minPairIndex << "] = " << CTCTrigger[minPairIndex] << " ns, minMatchDiff = " << minMatchDiff << " ns" << std::endl;
+                    
+		    double minAllowedDiff = 0;
                     double maxAllowedDiff = 100E3;
                     if (fitTargetTriggerWord == 14)
                     {
@@ -240,8 +280,10 @@ vector<vector<ULong64_t>> fitInThisReset(
                     }
                     else
                     {
-                        notOrphanIndex.push_back(lappdb);
-                        ctcPairedIndex.push_back(minPairIndex);
+			// std::cout << minMatchDiff << std::endl;
+                        // notOrphanIndex.push_back(lappdb);
+                        notOrphanIndex.push_back(diffSum.size() - 1);
+			ctcPairedIndex.push_back(minPairIndex);
                     }
                 }
                 else
@@ -250,73 +292,84 @@ vector<vector<ULong64_t>> fitInThisReset(
                 }
             }
 
+	    // std::cout << "i = " << i << " | j = " << j << " | diffSum = " << diffSum.size() << " | orphanCount = " << orphanCount << std::endl;
+
             double mean_dev = 0;
             for (int k = 0; k < diffSum.size(); k++)
             {
                 mean_dev += diffSum[k];
+		// std::cout << "DiffSum[" << k << "] = " << diffSum[k] << std::endl;
             }
             if (diffSum.size() > 0)
                 mean_dev = mean_dev / diffSum.size();
         
 
             double mean_dev_noOrphan = 0;
-            double pairedCount = 0;
+            int pairedCount = 0;
             for (int k = 0; k < notOrphanIndex.size(); k++)
             {
-                if (fitTargetTriggerWord == 14)
-                {
-                    if (diffSum.at(k) > 322E3 && diffSum.at(k) < 326E3)
-                        {
-                        mean_dev_noOrphan += diffSum[notOrphanIndex[k]];
-                        pairedCount += 1;
-                        }
-                }
-                else
-                {
-                    mean_dev_noOrphan += diffSum[notOrphanIndex[k]];
-                }
+		int idx = notOrphanIndex[k];
+		if (idx < 0 || idx >= diffSum.size())
+    		{
+       	 		std::cout << "SKIP BAD IDX: " << idx << std::endl;
+        		continue;
+    		}
+		
+		if (fitTargetTriggerWord == 14)
+    		{
+        		if (diffSum[idx] > 322E3 && diffSum[idx] < 326E3)
+        		{
+            			mean_dev_noOrphan += diffSum[idx];
+            			pairedCount += 1;
+        		}
+    		}
+		else {
+			mean_dev_noOrphan += diffSum[idx];
+			pairedCount += 1;
+		}
             }
-            if ((diffSum.size() - orphanCount) != 0)
+            if (pairedCount != 0)
             {
-                mean_dev_noOrphan = mean_dev_noOrphan / (diffSum.size() - orphanCount);
+                mean_dev_noOrphan = mean_dev_noOrphan / pairedCount;
             }
             else
             {
                 mean_dev_noOrphan = -1; // if all timestamps are out of the range, set it to -1
             }
 
-            bool increMean_dev = false;
-            int maxAttempts = 1000;
+            const int maxAttempts = 1000;
             int attemptCount = 0;
 
-            // the mean_dev can't be larger than 1 s because the beam spill is 15Hz.
-            // so, a good match will give a large number of events in desired range on integer level, minus the mean _dev.
-            // by selecting the largest quality Number, for matchs with the same matched beamgate, smaller mean_dev is better.
+            // The mean_dev can't be larger than 1 s because the beam spill is 15Hz.
+            // So, a good match will give a large number of events in desired range on integer level, minus the mean _dev.
+            // By selecting the largest quality Number, for matchs with the same matched beamgate, smaller mean_dev is better.
             double qualityNumber = pairedCount*1e9 - mean_dev; 
             bool debug = false;
             if (debug)
             {            
-                cout<<"LAPPD PPS "<<i << "= "<<LAPPD_PPS.at(i)<<" ps, CTC PPS "<<j<<" = "<<CTCPPS.at(j)<<", mean_dev = "<<mean_dev<<endl;
-                cout << "pairedCount = " << pairedCount << ", orphanCount = " << orphanCount << ", qualityNumber = " << qualityNumber << endl;
-                // print all diffSum
-                cout << "diffSum: ";
+		std::cout << "LAPPD PPS " << i << "= " << LAPPD_PPS.at(i) << " ps, CTC PPS " << j << " = "<< CTCPPS.at(j) << ", mean_dev = " << mean_dev << std::endl;
+		std::cout << "pairedCount = " << pairedCount << ", orphanCount = " << orphanCount << ", qualityNumber = " << qualityNumber << std::endl;
+		
+		// print all diffSum
+		std::cout << "diffSum: ";
                 for (const auto &diff : diffSum)
                 {
-                    cout << diff << ", ";
+			std::cout << diff << ", ";
                 }
-                cout << endl;
+                std::cout << std::endl;
             }
 
             if (mean_dev > 0)
             {
-                int increament_dev = 0;
-                while (true)
+                int increment_dev = 0;
+                while (attemptCount < maxAttempts)
                 {
                     // TODO
-                    auto iter = DerivationMap.find(mean_dev);
-                    if (iter == DerivationMap.end() || iter->second.empty())
+                    // auto iter = DerivationMap.find(mean_dev);
+                    auto iter = DerivationMap.find(qualityNumber);
+		    if (iter == DerivationMap.end() || iter->second.empty())
                     {
-                        vector<int> Info = {i, j, orphanCount, static_cast<int>(mean_dev_noOrphan * 1000), increament_dev};
+                        vector<int> Info = {i, j, orphanCount, static_cast<int>(mean_dev_noOrphan * 1000), increment_dev};
                         /*
                         DerivationMap[mean_dev].push_back(Info);
                         DerivationMap[mean_dev].push_back(notOrphanIndex);
@@ -333,18 +386,17 @@ vector<vector<ULong64_t>> fitInThisReset(
                     }
                     else
                     {
-                        increament_dev += 1;
-                        mean_dev += 0.001; // if the mean_dev is already in the map, increase it by 1ps
+                        increment_dev += 1;
+                        // mean_dev += 0.001; // if the mean_dev is already in the map, increase it by 1ps
                         qualityNumber += 1e-6;
                         attemptCount += 1;
-                        if (attemptCount > maxAttempts)
-                            break;
                     }
                 }
             }
         }
     }
-    // finish matching, found the minimum mean_dev in the map, extract the matching information
+
+    // finish matching, found the maximum qualityNumber in the map, extract the matching information
     double min_mean_dev = std::numeric_limits<double>::max();
     double max_qualityNumber = 0;
     int final_i = 0;
@@ -355,6 +407,7 @@ vector<vector<ULong64_t>> fitInThisReset(
     vector<int> final_notOrphanIndex;
     vector<int> final_ctcPairedIndex;
     vector<int> final_ctcOrphanIndex;
+    
     for (const auto &minIter : DerivationMap)
     {
         //if (minIter.first > 10 && minIter.first < min_mean_dev)
@@ -364,12 +417,14 @@ vector<vector<ULong64_t>> fitInThisReset(
             max_qualityNumber = minIter.first;
             double qnum_ns = minIter.first / 1e9;
             min_mean_dev = (std::ceil(qnum_ns) - qnum_ns)*1e9;
-            final_i = minIter.second[0][0];
+            
+	    final_i = minIter.second[0][0];
             final_j = minIter.second[0][1];
             gotOrphanCount = minIter.second[0][2];
             gotMin_mean_dev_noOrphan = static_cast<double>(minIter.second[0][3]) / 1000;
             increament_times = minIter.second[0][4];
-            final_notOrphanIndex = minIter.second[1];
+            
+	    final_notOrphanIndex = minIter.second[1];
             final_ctcPairedIndex = minIter.second[2];
             final_ctcOrphanIndex = minIter.second[3];
         }
@@ -379,21 +434,27 @@ vector<vector<ULong64_t>> fitInThisReset(
     ULong64_t final_offset_ps_negative = 0;
     if (drift == 0)
     {
-        cout<<"Drift is 0 above ns level." << " Using CTC PPS at index " << final_j <<" = "<<CTCPPS.at(final_j)<<" and LAPPD PPS at index "<<final_i<<" = "<<LAPPD_PPS.at(final_i)/1000<<endl;
-        final_offset_ns = CTCPPS.at(final_j) - (LAPPD_PPS.at(final_i) / 1000);
+	std::cout << "Drift is 0 above ns level." << " Using CTC PPS at index " << final_j 
+		<< " = " << CTCPPS.at(final_j) << " and LAPPD PPS at index " << final_i << " = " << LAPPD_PPS.at(final_i)/1000 << std::endl;
+        
+	final_offset_ns = CTCPPS.at(final_j) - (LAPPD_PPS.at(final_i) / 1000);
         final_offset_ps_negative = LAPPD_PPS.at(final_i) % 1000;
     }
     else
     {
         ULong64_t LAPPD_PPS_ns = LAPPD_PPS.at(final_i) / 1000;
         ULong64_t LAPPD_PPS_truncated_ps = LAPPD_PPS.at(final_i) % 1000;
-        double driftScaling = static_cast<double>(LAPPD_PPS_ns) / (trueInterval / 1000); // this is the same drift scaling as in the matching loop
-        ULong64_t totalDriftedClock = static_cast<ULong64_t>(drift * driftScaling / 1000);
-        cout<<fixed<<"Found CTCPPS as "<<CTCPPS.at(final_j)<<", LAPPD_PPS_ns = "<<LAPPD_PPS_ns;
+        double driftScaling = static_cast<double>(LAPPD_PPS_ns) / (trueInterval * 1.0 / 1000); // this is the same drift scaling as in the matching loop
+        ULong64_t totalDriftedClock = static_cast<ULong64_t>(static_cast<double>(drift) * driftScaling / 1000);
+        std::cout << fixed << "Found CTCPPS as " << CTCPPS.at(final_j) << ", LAPPD_PPS_ns = " << LAPPD_PPS_ns;
+
         final_offset_ns = CTCPPS.at(final_j) - (LAPPD_PPS_ns + totalDriftedClock);
         final_offset_ps_negative = LAPPD_PPS_truncated_ps; // this is useless if there is a drift though.
-        cout<<" final_offset_ns = "<<final_offset_ns<<", driftScaling = "<<driftScaling<<", totalDriftedClock_ns = "<<totalDriftedClock<<endl;
+	
+	std::cout << " final_offset_ns = " << final_offset_ns << ", driftScaling = "
+		<< driftScaling << ", totalDriftedClock_ns = " << totalDriftedClock << std::endl;
     }
+
     /*
     cout << "******* Fit Finished *******" << endl;
     cout << "*** Final offset in is " << final_offset_ns << " ns minus " << final_offset_ps_negative << " ps" << endl;
@@ -453,25 +514,31 @@ vector<vector<ULong64_t>> fitInThisReset(
     PPS_tick_correction.push_back(0);
     LAPPD_PPS_missing_ticks.push_back(0);
     LAPPD_PPS_interval_ticks.push_back(0);
-    ULong64_t intervalTicks = 320000000 * (PPSDeltaT / 1000 / 1E9);
+    ULong64_t intervalTicks = 320000000 * (PPSDeltaT / 1E12);
+    const ULong64_t LAPPD_PPS_SCALE = 3125;
+
     for (int i = 1; i < LAPPD_PPS.size(); i++)
     {
-        ULong64_t thisPPS = LAPPD_PPS.at(i) / 3125;
-        ULong64_t prevPPS = LAPPD_PPS.at(i - 1) / 3125;
-        long long thisInterval = thisPPS - prevPPS;
-        long long thisMissingTicks = intervalTicks - thisInterval;
+        ULong64_t thisPPS = LAPPD_PPS.at(i) / LAPPD_PPS_SCALE;
+        ULong64_t prevPPS = LAPPD_PPS.at(i - 1) / LAPPD_PPS_SCALE;
+        
+	// std::cout << "LAPPD_PPS.at(" << i << ") = " << LAPPD_PPS.at(i) << ", LAPPD_PPS.at(" << i-1 << ") = " << LAPPD_PPS.at(i-1) << std::endl;
+	long long thisInterval = static_cast<long long>(thisPPS) 
+		- static_cast<long long>(prevPPS);
+        long long thisMissingTicks = static_cast<long long>(intervalTicks) - thisInterval;
         LAPPD_PPS_interval_ticks.push_back(thisInterval);
 
-        // if the difference between this PPS and previous PPS is > intervalTicks-20 and < intervalTicks+5,
+	// if the difference between this PPS and previous PPS is > intervalTicks-20 and < intervalTicks+5,
         // the missed value is thisInterval - intervalTicks
         // push this value plus the sum of previous missing ticks to the vector
         // else just push the sum of previous missing ticks
+	
         long long sumOfPreviousMissingTicks = 0;
         for (int j = 0; j < LAPPD_PPS_missing_ticks.size(); j++)
         {
             sumOfPreviousMissingTicks += LAPPD_PPS_missing_ticks.at(j);
         }
-
+        
         if (thisMissingTicks > -20 && thisMissingTicks < 20)
         {
             LAPPD_PPS_missing_ticks.push_back(thisMissingTicks);
@@ -481,44 +548,83 @@ vector<vector<ULong64_t>> fitInThisReset(
         {
             // some time one pps might be wired, but the combination of two is ok.
             bool combined = false;
-            // if there are missing PPS, interval is like 22399999990 % 3200000000 = 3199999990
-            long long pInterval = thisInterval % intervalTicks;
+            
+	    // if there are missing PPS, interval is like 22399999990 % 3200000000 = 3199999990
+            long long pInterval = thisInterval % static_cast<long long>(intervalTicks);
             long long missingPTicks = 0;
-            if (intervalTicks - pInterval < 30)
-                missingPTicks = intervalTicks - pInterval;
+           
+	    // std::cout << "pInterval = " << pInterval << std::endl;
+	   
+	    // Case 1: There is a missing heartbeat and is an exact multiple of IntervalTicks
+	    if (pInterval == 0)
+	    {
+	        LAPPD_PPS_missing_ticks.push_back(0);
+	        PPS_tick_correction.push_back(sumOfPreviousMissingTicks);
+		std::cout << "Pushing PPS correction " << i << ", this PPS interval tick is " << thisInterval 
+			<< ", missing ticks: " << thisMissingTicks << ", push missing " << LAPPD_PPS_missing_ticks.back() 
+			<< ", push correction " << PPS_tick_correction.back() << std::endl;
+		continue;
+	    }
+
+	    // Case 2: There is a missing heartbeat but the next signal has a small drift
+	    if (static_cast<long long>(intervalTicks) - pInterval < 30)
+                missingPTicks = static_cast<long long>(intervalTicks) - pInterval;
             else if (pInterval < 30)
                 missingPTicks = -pInterval;
+
+	    // std::cout << "missingPTicks = " << missingPTicks << std::endl;
             //////
             if (missingPTicks == 1 || missingPTicks == -1)
             {
-                cout << "Found missing tick is " << missingPTicks << ",continue." << endl;
+		std::cout << "Found missing tick is " << missingPTicks << ", continue." << std::endl;
                 LAPPD_PPS_missing_ticks.push_back(0);
                 PPS_tick_correction.push_back(sumOfPreviousMissingTicks);
                 continue;
             }
-
+            
             if (missingPTicks != 0)
             {
                 LAPPD_PPS_missing_ticks.push_back(missingPTicks);
                 PPS_tick_correction.push_back(missingPTicks + sumOfPreviousMissingTicks);
                 combined = true;
-                cout << "Pushing PPS correction " << i << ", this PPS interval tick is " << thisInterval << ", missing ticks: " << thisMissingTicks << ", push missing " << LAPPD_PPS_missing_ticks.at(i) << ", push correction " << PPS_tick_correction.at(i) << endl;
+		std::cout << "Pushing PPS correction " << i << ", this PPS interval tick is " << thisInterval 
+			<< ", missing ticks: " << thisMissingTicks << ", push missing " << LAPPD_PPS_missing_ticks.back() 
+			<< ", push correction " << PPS_tick_correction.back() << std::endl;
                 continue;
             }
 
-            // if one PPS is not recoreded correctly, like one interval is 1574262436, followed by a 4825737559
-            // then 1574262436 + 4825737559 = 6399999995 = 3200000000 * 2 - 5
+            // Case 3: If one PPS is not recoreded correctly, like one interval is 1574262436, followed by a 4825737559
+            // Then 1574262436 + 4825737559 = 6399999995 = 3200000000 * 2 - 5
             long long nextInterval = 0;
+
             if (i < LAPPD_PPS.size() - 1)
             {
-                nextInterval = LAPPD_PPS.at(i + 1) / 3125 - thisPPS;
-                long long combinedMissingTicks = intervalTicks - (nextInterval + thisInterval) % intervalTicks;
+                nextInterval = static_cast<long long>(LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE) - static_cast<long long>(thisPPS);
+                long long combinedInterval = nextInterval + thisInterval;
+		long long combinedRemainder = combinedInterval % static_cast<long long>(intervalTicks);
+
+		// Case 3a: If the combined interval is an exact multiple of IntervalTicks
+		if (combinedRemainder == 0) {
+		    LAPPD_PPS_missing_ticks.push_back(0);
+		    PPS_tick_correction.push_back(sumOfPreviousMissingTicks);
+		    combined = true;
+
+		    std::cout << "Pushing PPS correction " << i << ", this PPS interval tick is " << thisInterval 
+			    << ", missing ticks: " << thisMissingTicks << ", push missing " << LAPPD_PPS_missing_ticks.back()
+			    << ", push correction " << PPS_tick_correction.back() << std::endl;
+		    continue;
+		}
+
+		// Case 3b: If the combined Interval is close to the IntervalTicks
+		long long combinedMissingTicks = static_cast<long long>(intervalTicks) - combinedRemainder;
                 if (combinedMissingTicks > -30 && combinedMissingTicks < 30)
                 {
                     LAPPD_PPS_missing_ticks.push_back(combinedMissingTicks);
                     PPS_tick_correction.push_back(combinedMissingTicks + sumOfPreviousMissingTicks);
                     combined = true;
-                    cout << "Pushing PPS correction " << i << ", this PPS interval tick is " << thisInterval << ", missing ticks: " << thisMissingTicks << ", push missing " << LAPPD_PPS_missing_ticks.at(i) << ", push correction " << PPS_tick_correction.at(i) << endl;
+		    std::cout << "Pushing PPS correction " << i << ", this PPS interval tick is " << thisInterval 
+			    << ", missing ticks: " << thisMissingTicks << ", push missing " << LAPPD_PPS_missing_ticks.back()
+			    << ", push correction " << PPS_tick_correction.back() << std::endl;
                     continue;
                 }
             }
@@ -526,18 +632,22 @@ vector<vector<ULong64_t>> fitInThisReset(
             if (!combined)
             {
                 LAPPD_PPS_missing_ticks.push_back(0);
-                PPS_tick_correction.push_back(sumOfPreviousMissingTicks);
-            }
-        }
-        cout << "Pushing PPS correction " << i << ", this PPS interval tick is " << thisInterval << ", missing ticks: " << thisMissingTicks << ", push missing " << LAPPD_PPS_missing_ticks.at(i) << ", push correction " << PPS_tick_correction.at(i) << endl;
+                PPS_tick_correction.push_back(sumOfPreviousMissingTicks); 
+	    }
+        }   
+	std::cout << "Pushing PPS correction " << i << ", this PPS interval tick is " << thisInterval 
+		<< ", missing ticks: " << thisMissingTicks << ", push missing " << LAPPD_PPS_missing_ticks.back() 
+		<< ", push correction " << PPS_tick_correction.back() << std::endl;
     }
 
     // loop all data events, plus the offset, save the event time and beamgate time
     // fing the closest CTC trigger, also save all information
-    cout << "Start saving results. PPS size: " << LAPPD_PPS.size() << ", beamgate size: " << LAPPDDataBeamgateUL.size() << endl;
-    cout << "First PPS: " << LAPPD_PPS.at(0) / 3125 << ", Last PPS: " << LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125 << endl;
-    cout << "First BG: " << LAPPDDataBeamgateUL.at(0) / 3125 << ", Last BG: " << LAPPDDataBeamgateUL.at(LAPPDDataBeamgateUL.size() - 1) / 3125 << endl;
-    cout << "First TS: " << LAPPDDataTimeStampUL.at(0) / 3125 << ", Last TS: " << LAPPDDataTimeStampUL.at(LAPPDDataTimeStampUL.size() - 1) / 3125 << endl;
+    std::cout << "Start saving results. PPS size: " << LAPPD_PPS.size() << ", beamgate size: " << LAPPDDataBeamgateUL.size() << std::endl;
+    std::cout << "First PPS: " << LAPPD_PPS.at(0) / LAPPD_PPS_SCALE << ", Last PPS: " << LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE << std::endl;
+    std::cout << "First BG: " << LAPPDDataBeamgateUL.at(0) / LAPPD_PPS_SCALE 
+	<< ", Last BG: " << LAPPDDataBeamgateUL.at(LAPPDDataBeamgateUL.size() - 1) / LAPPD_PPS_SCALE << std::endl;
+    std::cout << "First TS: " << LAPPDDataTimeStampUL.at(0) / LAPPD_PPS_SCALE 
+	<< ", Last TS: " << LAPPDDataTimeStampUL.at(LAPPDDataTimeStampUL.size() - 1) / LAPPD_PPS_SCALE << std::endl;
 
     for (int l = 0; l < LAPPDDataTimeStampUL.size(); l++)
     {
@@ -547,87 +657,106 @@ vector<vector<ULong64_t>> fitInThisReset(
         ULong64_t BG_truncated_ps = LAPPDDataBeamgateUL.at(l) % 1000;
         ULong64_t driftCorrectionForTS = 0;
         ULong64_t driftCorrectionForBG = 0;
+
         if (drift != 0)
         {
+            double driftScaling = static_cast<double>(TS_ns) / (trueInterval * 1.0 / 1000);
+            driftCorrectionForTS = static_cast<ULong64_t>(static_cast<double>(drift) * driftScaling / 1000);
+            double driftScalingBG = static_cast<double>(BG_ns) / (trueInterval * 1.0 / 1000);
+            driftCorrectionForBG = static_cast<ULong64_t>(static_cast<double>(drift) * driftScalingBG / 1000);
             
-            double driftScaling = static_cast<double>(TS_ns) / (trueInterval / 1000);
-            driftCorrectionForTS = static_cast<ULong64_t>(drift/ 1000 * driftScaling );
-            double driftScalingBG = static_cast<double>(BG_ns) / (trueInterval / 1000);
-            driftCorrectionForBG = static_cast<ULong64_t>(drift/ 1000 * driftScalingBG );
-            cout<<"drift = "<<drift<<", driftScaling = "<<driftScaling<<", driftCorrectionForTS = "<<driftCorrectionForTS<<", driftCorrectionForBG = "<<driftCorrectionForBG<<endl;
-            cout<<"driftCorrectionForTS = "<<driftCorrectionForTS<<", driftCorrectionForBG = "<<driftCorrectionForBG<<endl;
+	    std::cout << "drift = " << drift << ", driftScaling = " << driftScaling << ", driftCorrectionForTS = " << driftCorrectionForTS 
+		<< ", driftCorrectionForBG = " << driftCorrectionForBG << std::endl;
+            std::cout << "driftCorrectionForTS = " << driftCorrectionForTS << ", driftCorrectionForBG = " << driftCorrectionForBG << std::endl;
         }
+
         ULong64_t DriftCorrectedTS_ns = TS_ns + final_offset_ns + driftCorrectionForTS;
         ULong64_t DriftCorrectedBG_ns = BG_ns + final_offset_ns + driftCorrectionForBG;
-        cout<<"DriftCorrectedTS_ns = "<<DriftCorrectedTS_ns<<" =: final_offset_ns = "<<final_offset_ns<<" + driftCorrectionForTS = "<<driftCorrectionForTS<<" + TS_ns = "<<TS_ns<<endl;
+        std::cout << "DriftCorrectedTS_ns = " << DriftCorrectedTS_ns << " =: final_offset_ns = " << final_offset_ns
+	    << " + driftCorrectionForTS = " << driftCorrectionForTS << " + TS_ns = " << TS_ns << std::endl;
+
         ULong64_t min_mean_dev_match = std::numeric_limits<ULong64_t>::max();
         int matchedIndex = 0;
         for (int c = 0; c < CTCTrigger.size(); c++)
         {
             ULong64_t CTCTrigger_ns = CTCTrigger.at(c);
-            Long64_t diff = CTCTrigger_ns - DriftCorrectedTS_ns;
-            if (diff < 0)
+            Long64_t diff = static_cast<Long64_t>(CTCTrigger_ns) - static_cast<Long64_t>(DriftCorrectedTS_ns);
+	    
+	    if (diff < 0)
                 diff = -diff;
-            if (diff < min_mean_dev_match)
+            
+	    if (static_cast<ULong64_t>(diff) < min_mean_dev_match)
             {
                 matchedIndex = c;
-                min_mean_dev_match = diff;
+                min_mean_dev_match = static_cast<ULong64_t>(diff);
             }
         }
 
         // check the position of beamgate and timestamp raw fall into which pps interval;
         bool TSFound = false;
         bool BGFound = false;
+	const long long PPS_TICK_OFFSET = 1000;
+
         for (int i = 0; i < LAPPD_PPS.size() - 1; i++)
         {
-            if (LAPPD_PPS.at(i) / 3125 < LAPPDDataTimeStampUL.at(l) / 3125 && LAPPD_PPS.at(i + 1) / 3125 > LAPPDDataTimeStampUL.at(l) / 3125)
+            if (LAPPD_PPS.at(i) / LAPPD_PPS_SCALE < LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE && 
+		LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE > LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE)
             {
-                TimeStamp_correction_tick.push_back(PPS_tick_correction.at(i) + 1000);
+                TimeStamp_correction_tick.push_back(PPS_tick_correction.at(i) + PPS_TICK_OFFSET);
                 TSFound = true;
                 break;
             }
         }
-        if (!TSFound && LAPPDDataTimeStampUL.at(l) / 3125 > LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125)
+        
+	if (!TSFound && LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE > LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE)
         {
-            TimeStamp_correction_tick.push_back(PPS_tick_correction.at(LAPPD_PPS.size() - 1) + 1000);
+            TimeStamp_correction_tick.push_back(PPS_tick_correction.at(LAPPD_PPS.size() - 1) + PPS_TICK_OFFSET);
             TSFound = true;
         }
-        if (!TSFound && LAPPDDataTimeStampUL.at(l) / 3125 < LAPPD_PPS.at(0) / 3125)
+
+        if (!TSFound && LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE < LAPPD_PPS.at(0) / LAPPD_PPS_SCALE)
         {
-            TimeStamp_correction_tick.push_back(0 + 1000);
+            TimeStamp_correction_tick.push_back(0 + PPS_TICK_OFFSET);
             TSFound = true;
         }
 
         for (int i = 0; i < LAPPD_PPS.size() - 1; i++)
         {
-            if (LAPPD_PPS.at(i) / 3125 < LAPPDDataBeamgateUL.at(l) / 3125 && LAPPD_PPS.at(i + 1) / 3125 > LAPPDDataBeamgateUL.at(l) / 3125)
+            if (LAPPD_PPS.at(i) / LAPPD_PPS_SCALE < LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE && 
+		LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE > LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE)
             {
-                BeamGate_correction_tick.push_back(PPS_tick_correction.at(i) + 1000);
+                BeamGate_correction_tick.push_back(PPS_tick_correction.at(i) + PPS_TICK_OFFSET);
                 BGFound = true;
-                cout << "Normal push: BGraw = " << LAPPDDataBeamgateUL.at(l) / 3125 << ", pps = " << LAPPD_PPS.at(i) << ", pps/3125 = " << LAPPD_PPS.at(i) / 3125 << endl;
+                std::cout << "Normal push: BG_raw = " << LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE << ", pps = " << LAPPD_PPS.at(i) 
+			<< ", pps/" << LAPPD_PPS_SCALE << " = " << LAPPD_PPS.at(i) / LAPPD_PPS_SCALE << std::endl;
                 if (LAPPD_PPS_interval_ticks.at(i) != intervalTicks)
                 {
-                    cout << "Warning: PPS interval is not " << intervalTicks << " at index " << i << ", it is " << LAPPD_PPS_interval_ticks.at(i) << endl;
+                    std::cout << "Warning: PPS interval is not " << intervalTicks << " at index " << i << ", it is " << LAPPD_PPS_interval_ticks.at(i) << std::endl;
                 }
                 break;
             }
         }
-        if (!BGFound && LAPPDDataBeamgateUL.at(l) / 3125 > LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125)
+        
+	if (!BGFound && LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE > LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE)
         {
-            BeamGate_correction_tick.push_back(PPS_tick_correction.at(LAPPD_PPS.size() - 1) + 1000);
-            cout << "BGraw = " << LAPPDDataBeamgateUL.at(l) / 3125 << ", pps = " << LAPPD_PPS.at(LAPPD_PPS.size() - 1) << ", pps/3125 = " << LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125 << endl;
+            BeamGate_correction_tick.push_back(PPS_tick_correction.at(LAPPD_PPS.size() - 1) + PPS_TICK_OFFSET);
+            std::cout << "BG_raw = " << LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE << ", pps = " << LAPPD_PPS.at(LAPPD_PPS.size() - 1) 
+		<< ", pps/" << LAPPD_PPS_SCALE << " = " << LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE << std::endl;
             BGFound = true;
         }
-        if (!BGFound && LAPPDDataBeamgateUL.at(l) / 3125 < LAPPD_PPS.at(0) / 3125)
+
+        if (!BGFound && LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE < LAPPD_PPS.at(0) / LAPPD_PPS_SCALE)
         {
-            BeamGate_correction_tick.push_back(0 + 1000);
-            cout << "BGraw less than pps0" << endl;
+            BeamGate_correction_tick.push_back(0 + PPS_TICK_OFFSET);
+            std::cout << "BG_raw less than pps0" << std::endl;
             BGFound = true;
         }
+
         if (!TSFound || !BGFound)
         {
-            cout << "Error: PPS not found for event " << l << ", TSFound: " << TSFound << ", BGFound: " << BGFound << endl;
+            std::cout << "Error: PPS not found for event " << l << ", TSFound: " << TSFound << ", BGFound: " << BGFound << std::endl;
         }
+
         /*
         cout << "******Found result:" << endl;
         cout << "LAPPDDataTimeStampUL.at(" << l << "): " << LAPPDDataTimeStampUL.at(l)/3125 << endl;
@@ -648,7 +777,8 @@ vector<vector<ULong64_t>> fitInThisReset(
         cout << "TimeStamp_correction_tick at " << l << ": " << TimeStamp_correction_tick.at(l) << endl;
         */
 
-        // for this LAPPDDataBeamgateUL.at(l), in the LAPPD_PPS vector, find it's closest PPS before and after, and also calculate the time difference between them, and the missing tick between them.
+        // for this LAPPDDataBeamgateUL.at(l), in the LAPPD_PPS vector, find it's closest PPS before and after, 
+	// and also calculate the time difference between them, and the missing tick between them.
         // save as BG_PPSBefore_tick, BG_PPSAfter_tick, BG_PPSDiff_tick, BG_PPSMissing_tick
         // Do the same thing for LAPPDDataTimeStampUL.at(l), save as TS_PPSBefore_tick, TS_PPSAfter_tick, TS_PPSDiff_tick, TS_PPSMissing_tick
 
@@ -661,89 +791,123 @@ vector<vector<ULong64_t>> fitInThisReset(
         ULong64_t TS_PPSAfter_tick = 0;
         ULong64_t TS_PPSDiff_tick = 0;
         ULong64_t TS_PPSMissing_tick = 0;
-        // if the first PPS is later than beamgate, then set before = 0, after is the first, diff is the first, missing is the first
+        
+	// if the first PPS is later than beamgate, then set before = 0, after is the first, diff is the first, missing is the first
+        std::cout << "Start finding PPS before and after the beamgate" << std::endl;
 
-        cout << "Start finding PPS before and after the beamgate" << endl;
-
-        if ((LAPPD_PPS.at(0) / 3125 > LAPPDDataBeamgateUL.at(l) / 3125) || (LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125 < LAPPDDataBeamgateUL.at(l) / 3125))
+        if ((LAPPD_PPS.at(0) / LAPPD_PPS_SCALE > LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE) || 
+		(LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE < LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE))
         {
-            if (LAPPD_PPS.at(0) / 3125 > LAPPDDataBeamgateUL.at(l) / 3125)
+            if (LAPPD_PPS.at(0) / LAPPD_PPS_SCALE > LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE)
             {
                 BG_PPSBefore_tick = 0;
-                BG_PPSAfter_tick = LAPPD_PPS.at(0) / 3125;
-                BG_PPSDiff_tick = LAPPD_PPS.at(0) / 3125;
-                BG_PPSMissing_tick = LAPPD_PPS.at(0) / 3125;
-                cout << "First PPS is later than beamgate, before is 0, after is the first, diff is the first, missing is the first" << endl;
+                BG_PPSAfter_tick = LAPPD_PPS.at(0) / LAPPD_PPS_SCALE;
+                BG_PPSDiff_tick = LAPPD_PPS.at(0) / LAPPD_PPS_SCALE;
+                BG_PPSMissing_tick = LAPPD_PPS.at(0) / LAPPD_PPS_SCALE;
+
+                std::cout << "First PPS is later than beamgate, before is 0, after is the first, diff is the first, missing is the first" << std::endl;
             }
+
             // if the last PPS is earlier than beamgate, then set before is the last, after = 0, diff is the last, missing is the last
-            if (LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125 < LAPPDDataBeamgateUL.at(l) / 3125)
+            if (LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE < LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE)
             {
-                BG_PPSBefore_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125;
+                BG_PPSBefore_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE;
                 BG_PPSAfter_tick = 0;
-                BG_PPSDiff_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125;
-                BG_PPSMissing_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125;
-                cout << "Last PPS is earlier than beamgate, before is the last, after is 0, diff is the last, missing is the last" << endl;
+                BG_PPSDiff_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE;
+                BG_PPSMissing_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE;
+                
+		std::cout << "Last PPS is earlier than beamgate, before is the last, after is 0, diff is the last, missing is the last" << std::endl;
             }
         }
+
         else
         {
             // if the first PPS is earlier than beamgate, and the last PPS is later than beamgate, then find the closest PPS before and after
             for (int i = 0; i < LAPPD_PPS.size() - 1; i++)
             {
-                if (LAPPD_PPS.at(i) / 3125 < LAPPDDataBeamgateUL.at(l) / 3125 && LAPPD_PPS.at(i + 1) / 3125 > LAPPDDataBeamgateUL.at(l) / 3125)
+                if (LAPPD_PPS.at(i) / LAPPD_PPS_SCALE < LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE && 
+			LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE > LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE)
                 {
-                    BG_PPSBefore_tick = LAPPD_PPS.at(i) / 3125;
-                    BG_PPSAfter_tick = LAPPD_PPS.at(i + 1) / 3125;
-                    BG_PPSDiff_tick = LAPPD_PPS.at(i + 1) / 3125 - LAPPD_PPS.at(i) / 3125;
-                    ULong64_t DiffTick = (LAPPD_PPS.at(i + 1) - LAPPD_PPS.at(i)) / 3125 - 1000;
-                    BG_PPSMissing_tick = 3200000000 - DiffTick;
-                    cout << "Found PPS before and after the beamgate, before: " << BG_PPSBefore_tick << ", after: " << BG_PPSAfter_tick << ", diff: " << BG_PPSDiff_tick << ", missing: " << BG_PPSMissing_tick << endl;
+                    BG_PPSBefore_tick = LAPPD_PPS.at(i) / LAPPD_PPS_SCALE;
+                    BG_PPSAfter_tick = LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE;
+                    BG_PPSDiff_tick = LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE - LAPPD_PPS.at(i) / LAPPD_PPS_SCALE;
+                    ULong64_t DiffTick = (LAPPD_PPS.at(i + 1) - LAPPD_PPS.at(i)) / LAPPD_PPS_SCALE - PPS_TICK_OFFSET;
+
+		    ULong64_t remainder = DiffTick % intervalTicks;
+		    
+		    // Perfect multiple of intervalTicks
+		    if (remainder == 0) {
+			BG_PPSMissing_tick = 0;
+		    }
+		    else {
+			BG_PPSMissing_tick = std::min(remainder, intervalTicks - remainder);
+ 		    }
+
+                    std::cout << "Found PPS before and after the beamgate, before: " << BG_PPSBefore_tick << ", after: " << BG_PPSAfter_tick 
+			<< ", diff: " << BG_PPSDiff_tick << ", missing: " << BG_PPSMissing_tick << std::endl;
                     break;
                 }
             }
         }
 
-        // do the samething for timestamp
-        cout << "Start finding PPS before and after the timestamp" << endl;
+        // do the same for timestamp
+        std::cout << "Start finding PPS before and after the timestamp" << std::endl;
 
-        if ((LAPPD_PPS.at(0) / 3125 > LAPPDDataTimeStampUL.at(l) / 3125) || (LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125 < LAPPDDataTimeStampUL.at(l) / 3125))
+        if ((LAPPD_PPS.at(0) / LAPPD_PPS_SCALE > LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE) || 
+		(LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE < LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE))
         {
-            if (LAPPD_PPS.at(0) / 3125 > LAPPDDataTimeStampUL.at(l) / 3125)
+            if (LAPPD_PPS.at(0) / LAPPD_PPS_SCALE > LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE)
             {
                 TS_PPSBefore_tick = 0;
-                TS_PPSAfter_tick = LAPPD_PPS.at(0) / 3125;
-                TS_PPSDiff_tick = LAPPD_PPS.at(0) / 3125;
-                TS_PPSMissing_tick = LAPPD_PPS.at(0) / 3125;
-                cout << "First PPS is later than timestamp, before is 0, after is the first, diff is the first, missing is the first" << endl;
+                TS_PPSAfter_tick = LAPPD_PPS.at(0) / LAPPD_PPS_SCALE;
+                TS_PPSDiff_tick = LAPPD_PPS.at(0) / LAPPD_PPS_SCALE;
+                TS_PPSMissing_tick = LAPPD_PPS.at(0) / LAPPD_PPS_SCALE;
+
+                std::cout << "First PPS is later than timestamp, before is 0, after is the first, diff is the first, missing is the first" << std::endl;
             }
-            if (LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125 < LAPPDDataTimeStampUL.at(l) / 3125)
+
+            if (LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE < LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE)
             {
-                TS_PPSBefore_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125;
+                TS_PPSBefore_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE;
                 TS_PPSAfter_tick = 0;
-                TS_PPSDiff_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125;
-                TS_PPSMissing_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / 3125;
-                cout << "Last PPS is earlier than timestamp, before is the last, after is 0, diff is the last, missing is the last" << endl;
+                TS_PPSDiff_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE;
+                TS_PPSMissing_tick = LAPPD_PPS.at(LAPPD_PPS.size() - 1) / LAPPD_PPS_SCALE;
+
+                std::cout << "Last PPS is earlier than timestamp, before is the last, after is 0, diff is the last, missing is the last" << std::endl;
             }
         }
+
         else
         {
             for (int i = 0; i < LAPPD_PPS.size() - 1; i++)
             {
-                if (LAPPD_PPS.at(i) / 3125 < LAPPDDataTimeStampUL.at(l) / 3125 && LAPPD_PPS.at(i + 1) / 3125 > LAPPDDataTimeStampUL.at(l) / 3125)
+                if (LAPPD_PPS.at(i) / LAPPD_PPS_SCALE < LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE && 
+			LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE > LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE)
                 {
-                    TS_PPSBefore_tick = LAPPD_PPS.at(i) / 3125;
-                    TS_PPSAfter_tick = LAPPD_PPS.at(i + 1) / 3125;
-                    TS_PPSDiff_tick = LAPPD_PPS.at(i + 1) / 3125 - LAPPD_PPS.at(i) / 3125;
-                    ULong64_t DiffTick = (LAPPD_PPS.at(i + 1) - LAPPD_PPS.at(i)) / 3125 - 1000;
-                    TS_PPSMissing_tick = 3200000000 - DiffTick;
-                    cout << "Found PPS before and after the timestamp, before: " << TS_PPSBefore_tick << ", after: " << TS_PPSAfter_tick << ", diff: " << TS_PPSDiff_tick << ", missing: " << TS_PPSMissing_tick << endl;
+                    TS_PPSBefore_tick = LAPPD_PPS.at(i) / LAPPD_PPS_SCALE;
+                    TS_PPSAfter_tick = LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE;
+                    TS_PPSDiff_tick = LAPPD_PPS.at(i + 1) / LAPPD_PPS_SCALE - LAPPD_PPS.at(i) / LAPPD_PPS_SCALE;
+                    ULong64_t DiffTick = (LAPPD_PPS.at(i + 1) - LAPPD_PPS.at(i)) / LAPPD_PPS_SCALE - PPS_TICK_OFFSET;
+
+		    ULong64_t remainder = DiffTick % intervalTicks;
+
+                    // Perfect multiple of intervalTicks
+                    if (remainder == 0) {
+                        TS_PPSMissing_tick = 0;
+                    }
+                    else {
+                        TS_PPSMissing_tick = std::min(remainder, intervalTicks - remainder);
+                    }
+
+                    std::cout << "Found PPS before and after the timestamp, before: " << TS_PPSBefore_tick << ", after: " << TS_PPSAfter_tick 
+			<< ", diff: " << TS_PPSDiff_tick << ", missing: " << TS_PPSMissing_tick << std::endl;
                     break;
                 }
             }
         }
 
-        TimeStampRaw.push_back(LAPPDDataTimeStampUL.at(l) / 3125);
-        BeamGateRaw.push_back(LAPPDDataBeamgateUL.at(l) / 3125);
+        TimeStampRaw.push_back(LAPPDDataTimeStampUL.at(l) / LAPPD_PPS_SCALE);
+        BeamGateRaw.push_back(LAPPDDataBeamgateUL.at(l) / LAPPD_PPS_SCALE);
         TimeStamp_ns.push_back(DriftCorrectedTS_ns);
         BeamGate_ns.push_back(DriftCorrectedBG_ns);
         TimeStamp_ps.push_back(TS_truncated_ps);
@@ -766,6 +930,7 @@ vector<vector<ULong64_t>> fitInThisReset(
         TS_driftCorrection_ns.push_back(driftCorrectionForTS);
         BG_driftCorrection_ns.push_back(driftCorrectionForBG);
     }
+
     ULong64_t totalEventNumber = LAPPDDataTimeStampUL.size();
     ULong64_t gotOrphanCount_out = gotOrphanCount;
     ULong64_t gotMin_mean_dev_noOrphan_out = gotMin_mean_dev_noOrphan;
@@ -775,16 +940,22 @@ vector<vector<ULong64_t>> fitInThisReset(
     ULong64_t final_j_out = final_j;
     ULong64_t drift_out = drift;
 
-    vector<ULong64_t> FitInfo = {final_offset_ns, final_offset_ps_negative, gotOrphanCount_out, gotMin_mean_dev_noOrphan_out, increament_times_out, min_mean_dev_out, final_i_out, final_j_out, totalEventNumber, drift_out};
+    vector<ULong64_t> FitInfo = {final_offset_ns, final_offset_ps_negative, gotOrphanCount_out, gotMin_mean_dev_noOrphan_out, 
+	increament_times_out, min_mean_dev_out, final_i_out, final_j_out, totalEventNumber, drift_out};
 
-    vector<vector<ULong64_t>> Result = {FitInfo, TimeStampRaw, BeamGateRaw, TimeStamp_ns, BeamGate_ns, TimeStamp_ps, BeamGate_ps, EventIndex, EventDeviation_ns, CTCTriggerIndex, CTCTriggerTimeStamp_ns, BeamGate_correction_tick, TimeStamp_correction_tick, LAPPD_PPS_interval_ticks, BG_PPSBefore, BG_PPSAfter, BG_PPSDiff, BG_PPSMiss, TS_PPSBefore, TS_PPSAfter, TS_PPSDiff, TS_PPSMiss, TS_driftCorrection_ns, BG_driftCorrection_ns};
+    vector<vector<ULong64_t>> Result = {FitInfo, TimeStampRaw, BeamGateRaw, TimeStamp_ns, BeamGate_ns, TimeStamp_ps, BeamGate_ps, 
+	EventIndex, EventDeviation_ns, CTCTriggerIndex, CTCTriggerTimeStamp_ns, BeamGate_correction_tick, TimeStamp_correction_tick, 
+	LAPPD_PPS_interval_ticks, BG_PPSBefore, BG_PPSAfter, BG_PPSDiff, BG_PPSMiss, TS_PPSBefore, TS_PPSAfter, TS_PPSDiff, TS_PPSMiss, 
+	TS_driftCorrection_ns, BG_driftCorrection_ns};
+   
     return Result;
 }
 
-vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, int runNumber, int subRunNumber, int partFileNumber, int LAPPD_ID, int fitTargetTriggerWord, bool triggerGrouped, int intervalInSecond)
+vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, int runNumber, int subRunNumber, int partFileNumber, 
+		int LAPPD_ID, int fitTargetTriggerWord, bool triggerGrouped, int intervalInSecond)
 {
-    cout << "***************************************" << endl;
-    cout << "Fitting in run " << runNumber << ", sub run " << subRunNumber << ", part file " << partFileNumber << " for LAPPD ID " << LAPPD_ID << endl;
+    std::cout << "***************************************" << std::endl;
+    std::cout << "Fitting in run " << runNumber << ", sub run " << subRunNumber << ", part file " << partFileNumber << " for LAPPD ID " << LAPPD_ID << std::endl;
 
     vector<ULong64_t> LAPPD_PPS0;
     vector<ULong64_t> LAPPD_PPS1;
@@ -805,8 +976,8 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     ULong64_t LAPPDBeamgateUL;
     ULong64_t LAPPDDataTimestamp;
     ULong64_t LAPPDDataBeamgate;
-    double LAPPDDataTimestampFloat;
-    double LAPPDDataBeamgateFloat;
+    // double LAPPDDataTimestampFloat;
+    // double LAPPDDataBeamgateFloat;
 
     vector<uint32_t> *CTCTriggerWord = nullptr;
     ULong64_t CTCTimeStamp;
@@ -821,8 +992,8 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     lappdTree->SetBranchAddress("LAPPDDataBeamgateUL", &LAPPDBeamgateUL);
     lappdTree->SetBranchAddress("LAPPDDataTimestamp", &LAPPDDataTimestamp);
     lappdTree->SetBranchAddress("LAPPDDataBeamgate", &LAPPDDataBeamgate);
-    lappdTree->SetBranchAddress("LAPPDDataTimestampFloat", &LAPPDDataTimestampFloat);
-    lappdTree->SetBranchAddress("LAPPDDataBeamgateFloat", &LAPPDDataBeamgateFloat);
+    // lappdTree->SetBranchAddress("LAPPDDataTimestampFloat", &LAPPDDataTimestampFloat);
+    // lappdTree->SetBranchAddress("LAPPDDataBeamgateFloat", &LAPPDDataBeamgateFloat);
     lappdTree->SetBranchAddress("ppsTime0", &ppsTime0);
     lappdTree->SetBranchAddress("ppsTime1", &ppsTime1);
 
@@ -830,6 +1001,7 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     triggerTree->SetBranchAddress("RunNumber", &runNumber_inTree);
     triggerTree->SetBranchAddress("SubRunNumber", &subRunNumber_inTree);
     triggerTree->SetBranchAddress("PartFileNumber", &partFileNumber_inTree);
+    
     if (triggerGrouped)
     {
         triggerTree->SetBranchAddress("gTrigWord", &groupedTriggerWords);
@@ -846,68 +1018,84 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     int repeatedPPSNumber0 = -1;
     int repeatedPPSNumber1 = -1;
 
-    // 5. loop TimeStamp tree
+    // 4. For each LAPPD ID,
+    // 4a. Loop over TimeStamp tree
     for (int i = 0; i < l_nEntries; i++)
     {
         lappdTree->GetEntry(i);
+        
         // if(i<100)
-        //     cout<<"LAPPD_ID_inTree: "<<LAPPD_ID_inTree<<", runNumber_inTree: "<<runNumber_inTree<<", subRunNumber_inTree: "<<subRunNumber_inTree<<", partFileNumber_inTree: "<<partFileNumber_inTree<<endl;
-        //     cout<<"LAPPD_ID: "<<LAPPD_ID<<", runNumber: "<<runNumber<<", subRunNumber: "<<subRunNumber<<", partFileNumber: "<<partFileNumber<<endl;
+        // std::cout << "LAPPD_ID_inTree: " << LAPPD_ID_inTree << ", runNumber_inTree: " << runNumber_inTree 
+		// << ", subRunNumber_inTree: " << subRunNumber_inTree << ", partFileNumber_inTree: " << partFileNumber_inTree << std::endl;
+        // std::cout << "LAPPD_ID: " << LAPPD_ID << ", runNumber: " << runNumber << ", subRunNumber: " << subRunNumber 
+		// << ", partFileNumber: " << partFileNumber << std::endl;
+
+	// 1000 / 8 * 25 = 3125
         if (LAPPD_ID_inTree == LAPPD_ID && runNumber_inTree == runNumber && subRunNumber_inTree == subRunNumber && partFileNumber_inTree == partFileNumber)
         {
             if (LAPPDTimeStampUL != 0)
             {
-                cout << "In unit of 1ps, after conversion and saving, LAPPDTimeStampUL: " << LAPPDTimeStampUL * 1000 / 8 * 25 << ", LAPPDBeamgateUL: " << LAPPDBeamgateUL * 1000 / 8 * 25 << endl;
-                cout << "In second, use double, Timestamp: " << static_cast<double>(LAPPDTimeStampUL * 1000 / 8 * 25) / 1E9 / 1000 << ", Beamgate: " << static_cast<double>(LAPPDBeamgateUL * 1000 / 8 * 25) / 1E9 / 1000 << endl;
-                LAPPDDataTimeStampUL.push_back(LAPPDTimeStampUL * 1000 / 8 * 25);
-                LAPPDDataBeamgateUL.push_back(LAPPDBeamgateUL * 1000 / 8 * 25);
+                std::cout << "In unit of 1ps, after conversion and saving, LAPPDTimeStampUL: " << LAPPDTimeStampUL * 3125 
+			<< ", LAPPDBeamgateUL: " << LAPPDBeamgateUL * 3125 << std::endl;
+                std::cout << "In second, use double, Timestamp: " << static_cast<double>(LAPPDTimeStampUL * 3125) / 1E12 
+			<< ", Beamgate: " << static_cast<double>(LAPPDBeamgateUL * 3125) / 1E12 << std::endl;
+
+                LAPPDDataTimeStampUL.push_back(LAPPDTimeStampUL * 3125);
+                LAPPDDataBeamgateUL.push_back(LAPPDBeamgateUL * 3125);
+
                 /*
-                cout << "LAPPDDataTimestamp: " << LAPPDDataTimestamp << ", LAPPDDataBeamgate: " << LAPPDDataBeamgate << endl;
-                cout << "LAPPDDataTimestampFloat: " << LAPPDDataTimestampFloat << ", LAPPDDataBeamgateFloat: " << LAPPDDataBeamgateFloat << endl;
+                std::cout << "LAPPDDataTimestamp: " << LAPPDDataTimestamp << ", LAPPDDataBeamgate: " << LAPPDDataBeamgate << std::endl;
+                std::cout << "LAPPDDataTimestampFloat: " << LAPPDDataTimestampFloat << ", LAPPDDataBeamgateFloat: " << LAPPDDataBeamgateFloat << std::endl;
+                
                 ULong64_t ULTS = LAPPDTimeStampUL*1000/8*25;
                 double DTS = static_cast<double>(LAPPDDataTimestamp);
                 double plusDTS = DTS + LAPPDDataTimestampFloat;
                 ULong64_t ULBG = LAPPDBeamgateUL*1000/8*25;
                 double DBG = static_cast<double>(LAPPDDataBeamgate);
                 double plusDBG = DBG + LAPPDDataBeamgateFloat;
-                cout << std::fixed << " ULTS: " << ULTS << ", DTS: " << DTS << ", plusDTS: " << plusDTS << endl;
-                cout << std::fixed << " ULBG: " << ULBG << ", DBG: " << DBG << ", plusDBG: " << plusDBG << endl;
-                cout << endl;
+
+                std::cout << std::fixed << " ULTS: " << ULTS << ", DTS: " << DTS << ", plusDTS: " << plusDTS << std::endl;
+                std::cout << std::fixed << " ULBG: " << ULBG << ", DBG: " << DBG << ", plusDBG: " << plusDBG << std::endl;
+                std::cout << std::endl;
                 */
             }
             else if (LAPPDTimeStampUL == 0)
             {
-                // cout << "ppsTime0: " << ppsTime0 << ", ppsTime1: " << ppsTime1 << endl;
+                // std::cout << "ppsTime0: " << ppsTime0 << ", ppsTime1: " << ppsTime1 << std::endl;
+                
                 if (LAPPD_PPS0.size() == 0)
-                    LAPPD_PPS0.push_back(ppsTime0 * 1000 / 8 * 25);
+                    LAPPD_PPS0.push_back(ppsTime0 * 3125);
                 if (LAPPD_PPS1.size() == 0)
-                    LAPPD_PPS1.push_back(ppsTime1 * 1000 / 8 * 25);
-                if (LAPPD_PPS0.size() > 0 && ppsTime0 * 1000 / 8 * 25 != LAPPD_PPS0.at(LAPPD_PPS0.size() - 1))
-                    LAPPD_PPS0.push_back(ppsTime0 * 1000 / 8 * 25);
+                    LAPPD_PPS1.push_back(ppsTime1 * 3125);
+                if (LAPPD_PPS0.size() > 0 && ppsTime0 * 3125 != LAPPD_PPS0.at(LAPPD_PPS0.size() - 1))
+                    LAPPD_PPS0.push_back(ppsTime0 * 3125);
                 else
                     repeatedPPSNumber0 += 1;
-                if (LAPPD_PPS1.size() > 0 && ppsTime1 * 1000 / 8 * 25 != LAPPD_PPS1.at(LAPPD_PPS1.size() - 1))
-                    LAPPD_PPS1.push_back(ppsTime1 * 1000 / 8 * 25);
+                if (LAPPD_PPS1.size() > 0 && ppsTime1 * 3125 != LAPPD_PPS1.at(LAPPD_PPS1.size() - 1))
+                    LAPPD_PPS1.push_back(ppsTime1 * 3125);
                 else
                     repeatedPPSNumber1 += 1;
             }
         }
     }
-    cout << "repeatedPPSNumber0: " << repeatedPPSNumber0 << ", loaded PPS0 size: " << LAPPD_PPS0.size() << endl;
-    cout << "repeatedPPSNumber1: " << repeatedPPSNumber1 << ", loaded PPS1 size: " << LAPPD_PPS1.size() << endl;
+    
+    std::cout << "repeatedPPSNumber0: " << repeatedPPSNumber0 << ", loaded PPS0 size: " << LAPPD_PPS0.size() << std::endl;
+    std::cout << "repeatedPPSNumber1: " << repeatedPPSNumber1 << ", loaded PPS1 size: " << LAPPD_PPS1.size() << std::endl;
 
-    // 6. loop Trig (or GTrig) tree
+    // 4b. Loop over Trig (or GTrig) tree
     for (int i = 0; i < t_nEntries; i++)
     {
         triggerTree->GetEntry(i);
         if (runNumber_inTree == runNumber && subRunNumber_inTree == subRunNumber && partFileNumber_inTree == partFileNumber)
         {
-            // cout<<"triggerGrouped: "<<triggerGrouped<<", fitTargetTriggerWord: "<<fitTargetTriggerWord<<endl;
+            // std::cout << "triggerGrouped: " << triggerGrouped << ", fitTargetTriggerWord: " << fitTargetTriggerWord << std::endl;
             if (triggerGrouped)
             {
                 for (int j = 0; j < groupedTriggerWords->size(); j++)
                 {
-                    // cout<<"At j = "<<j<<",finding groupedTriggerWords: "<<groupedTriggerWords->at(j)<<", fitTargetTriggerWord: "<<fitTargetTriggerWord<<endl;
+                    // std::cout << "At j = " << j << ",finding groupedTriggerWords: " << groupedTriggerWords->at(j) 
+			// << ", fitTargetTriggerWord: " << fitTargetTriggerWord << std::endl;
+
                     if (groupedTriggerWords->at(j) == fitTargetTriggerWord)
                         CTCTargetTimeStamp.push_back(groupedTriggerTimestamps->at(j));
                     if (groupedTriggerWords->at(j) == 32)
@@ -926,25 +1114,28 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
             }
         }
     }
-    cout << "Vector for partfile " << partFileNumber << " for LAPPD ID " << LAPPD_ID << " loaded." << endl;
-    cout << "LAPPDDataTimeStampUL in ps size: " << LAPPDDataTimeStampUL.size() << endl;
-    cout << "LAPPDDataBeamgateUL in ps size: " << LAPPDDataBeamgateUL.size() << endl;
-    cout << "LAPPD_PPS0 size: " << LAPPD_PPS0.size() << endl;
-    cout << "LAPPD_PPS1 size: " << LAPPD_PPS1.size() << endl;
-    cout << "CTCTargetTimeStamp size: " << CTCTargetTimeStamp.size() << endl;
-    cout << "CTCPPSTimeStamp size: " << CTCPPSTimeStamp.size() << endl;
-    // 7. Find the number of resets in LAPPD PPS:
+    
+    std::cout << "Vector for partfile " << partFileNumber << " for LAPPD ID " << LAPPD_ID << " loaded." << std::endl;
+    std::cout << "LAPPDDataTimeStampUL in ps size: " << LAPPDDataTimeStampUL.size() << std::endl;
+    std::cout << "LAPPDDataBeamgateUL in ps size: " << LAPPDDataBeamgateUL.size() << std::endl;
+    std::cout << "LAPPD_PPS0 size: " << LAPPD_PPS0.size() << std::endl;
+    std::cout << "LAPPD_PPS1 size: " << LAPPD_PPS1.size() << std::endl;
+    std::cout << "CTCTargetTimeStamp size: " << CTCTargetTimeStamp.size() << std::endl;
+    std::cout << "CTCPPSTimeStamp size: " << CTCPPSTimeStamp.size() << std::endl;
+   
+    // 5. Find the number of resets in LAPPD PPS:
     int LAPPDDataFitStopIndex = 0;
     int resetNumber = 0;
-    // first check is there a reset, if no, set the LAPPDDataFitStopIndex to the size of LAPPDDataTimeStampUL
-    // if all PPS in this part file was increamented, then there is no reset
+    
+    // First check if there is a reset, if not, set the LAPPDDataFitStopIndex to the size of LAPPDDataTimeStampUL
+    // If all PPS in this part file was incremented, then there is no reset
     for (int i = 1; i < LAPPD_PPS0.size(); i++)
     {
         if (LAPPD_PPS0[i] < LAPPD_PPS0[i - 1])
         {
             resetNumber += 1;
-            cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber << ", part file number " << partFileNumber << ", reset "
-                 << " found at PPS_ACDC0 index " << i << endl;
+            std::cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber 
+		<< ", part file number " << partFileNumber << ", reset " << " found at PPS_ACDC0 index " << i << std::endl;
             break;
         }
     }
@@ -953,16 +1144,18 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
         if (LAPPD_PPS1[i] < LAPPD_PPS1[i - 1])
         {
             resetNumber += 1;
-            cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber << ", part file number " << partFileNumber << ", reset "
-                 << " found at PPS_ACDC1 index " << i << endl;
+            std::cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber 
+		<< ", part file number " << partFileNumber << ", reset " << " found at PPS_ACDC1 index " << i << std::endl;
             break;
         }
     }
-    if (resetNumber == 0)
-        cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber << ", part file number " << partFileNumber << ", no reset found." << endl;
 
-    // if reset found, loop the timestamp in order to find the LAPPDDataFitStopIndex
-    //
+    if (resetNumber == 0) {
+        std::cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber 
+		<< ", part file number " << partFileNumber << ", no reset found." << std::endl;
+    }
+
+    // If reset found, loop the timestamp in order to find the LAPPDDataFitStopIndex
     if (resetNumber != 0)
     {
         for (int i = 1; i < LAPPDDataTimeStampUL.size(); i++)
@@ -975,22 +1168,26 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
         }
         // TODO: extend this to later offsets
     }
-    // 8. Use the target trigger word, fit the offset
-    // TODO: fit for each reset
+    
+    // 6. Use the target trigger word to fit the offset
+    // TODO: Fit for each reset
+
     vector<vector<ULong64_t>> ResultTotal;
     if (LAPPDDataTimeStampUL.size() == LAPPDDataBeamgateUL.size())
     {
         if (LAPPD_PPS0.size() == 0 || LAPPD_PPS1.size() == 0)
         {
-            cout << "Error: PPS0 or PPS1 is empty, return empty result." << endl;
+            std::cout << "Error: PPS0 or PPS1 is empty, return empty result." << std::endl;
             return ResultTotal;
         }
-        vector<vector<ULong64_t>> ResultACDC0 = fitInThisReset(LAPPDDataTimeStampUL, LAPPDDataBeamgateUL, LAPPD_PPS0, fitTargetTriggerWord, CTCTargetTimeStamp, CTCPPSTimeStamp, intervalInSecond * 1E9 * 1000, partFileNumber, 0);
-        vector<vector<ULong64_t>> ResultACDC1 = fitInThisReset(LAPPDDataTimeStampUL, LAPPDDataBeamgateUL, LAPPD_PPS1, fitTargetTriggerWord, CTCTargetTimeStamp, CTCPPSTimeStamp, intervalInSecond * 1E9 * 1000, partFileNumber, 1);
 
-        // 9. save the offset for this LAPPD ID, run number, part file number, index, reset number.
+        vector<vector<ULong64_t>> ResultACDC0 = fitInThisReset(LAPPDDataTimeStampUL, LAPPDDataBeamgateUL, LAPPD_PPS0, fitTargetTriggerWord, 
+		CTCTargetTimeStamp, CTCPPSTimeStamp, static_cast<ULong64_t>(intervalInSecond) * 1000000000000ULL, partFileNumber, 0);
+        vector<vector<ULong64_t>> ResultACDC1 = fitInThisReset(LAPPDDataTimeStampUL, LAPPDDataBeamgateUL, LAPPD_PPS1, fitTargetTriggerWord, 
+		CTCTargetTimeStamp, CTCPPSTimeStamp, static_cast<ULong64_t>(intervalInSecond) * 1000000000000ULL, partFileNumber, 1);
 
-        cout << "Fitting in part file " << partFileNumber << " for LAPPD ID " << LAPPD_ID << " done." << endl;
+        // 7. Save the offset for this LAPPD ID, run number, part file number, index and reset number.
+        std::cout << "Fitting in part file " << partFileNumber << " for LAPPD ID " << LAPPD_ID << " done." << std::endl;
 
         // Combine ResultACDC0 and ResultACDC1 to ResultTotal
         for (int i = 0; i < ResultACDC0.size(); i++)
@@ -1007,19 +1204,18 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
 
 void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool triggerGrouped, int intervalInSecond, int processPFNumber)
 {
-    // 1. load LAPPDTree.root
+    // 1. Load LAPPDTree.root
     const string file = fileName;
     TFile *f = new TFile(file.c_str(), "READ");
+    
     if (!f->IsOpen())
     {
         std::cerr << "Error: cannot open file " << file << std::endl;
         return;
     }
-
     std::cout << "Opened file " << file << std::endl;
 
     std::ofstream outputOffset("offset.txt");
-
     outputOffset << "runNumber"
                  << "\t"
                  << "subRunNumber"
@@ -1057,51 +1253,57 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
                  << "min_mean_dev_ACDC1"
                  << std::endl;
 
-    // 2. load TimeStamp tree, get run number and part file number
+    // 2. Load TimeStamp tree, get run number and part file number
     TTree *TSTree = (TTree *)f->Get("TimeStamp");
     TTree *CTCTree = (TTree *)f->Get("Trig");
     TTree *GCTCTree = (TTree *)f->Get("GTrig");
+
     int runNumber;
     int subRunNumber;
     int partFileNumber;
     int LAPPD_ID;
     ULong64_t ppsCount0;
+    
     TSTree->SetBranchAddress("RunNumber", &runNumber);
     TSTree->SetBranchAddress("SubRunNumber", &subRunNumber);
     TSTree->SetBranchAddress("PartFileNumber", &partFileNumber);
     TSTree->SetBranchAddress("LAPPD_ID", &LAPPD_ID);
     TSTree->SetBranchAddress("ppsCount0", &ppsCount0);
+    
     std::vector<vector<int>> loopInfo;
     int nEntries = TSTree->GetEntries();
+    
     for (int i = 0; i < nEntries; i++)
     {
         TSTree->GetEntry(i);
-        // if this entry is PPS event, continue.
+        
+        // If this entry is PPS event, continue.
         if (ppsCount0 != 0)
             continue;
+        
         vector<int> info = {runNumber, subRunNumber, partFileNumber, LAPPD_ID};
-        // find if this info is already in loopInfo
+        
+        // Find if this info is already in loopInfo
         bool found = std::find_if(loopInfo.begin(), loopInfo.end(), [&info](const std::vector<int> &vec)
                                   {
                                       return vec == info; // compare vec and info
                                   }) != loopInfo.end();   // if find_if doesn't return end，found
 
-        if (!found)
-            loopInfo.push_back(info);
+        if (!found) loopInfo.push_back(info);
     }
 
-    // 3. for each unique run number and part file number
-    // 4. in this file, for each LAPPD ID
-    // do fit:
+    // 3. For each unique run number and part file number, perform the fit.
     std::map<string, vector<vector<ULong64_t>>> ResultMap;
     std::vector<vector<int>>::iterator it;
     int pfNumber = 0;
+
     for (it = loopInfo.begin(); it != loopInfo.end(); it++)
     {
         int runNumber = (*it)[0];
         int subRunNumber = (*it)[1];
         int partFileNumber = (*it)[2];
         int LAPPD_ID = (*it)[3];
+        
         if (processPFNumber != 0)
         {
             if (pfNumber >= processPFNumber)
@@ -1110,14 +1312,16 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
 
         vector<vector<ULong64_t>> Result;
         if (!triggerGrouped)
-        { // cout<<"trigger not grouped"<<endl;
+        { 
+            // std::cout << "Trigger is not grouped" << std::endl;
             Result = fitInPartFile(TSTree, CTCTree, runNumber, subRunNumber, partFileNumber, LAPPD_ID, fitTargetTriggerWord, triggerGrouped, intervalInSecond);
         }
         else
-
-        { // cout<<"trigger grouped"<<endl;
+        { 
+            // std::cout << "Trigger is grouped" << std::endl;
             Result = fitInPartFile(TSTree, GCTCTree, runNumber, subRunNumber, partFileNumber, LAPPD_ID, fitTargetTriggerWord, triggerGrouped, intervalInSecond);
         }
+
         // Combine the *it to a string, and save the result to ResultMap
         string key = std::to_string(runNumber) + "_" + std::to_string(subRunNumber) + "_" + std::to_string(partFileNumber) + "_" + std::to_string(LAPPD_ID);
         ResultMap[key] = Result;
@@ -1125,8 +1329,11 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
     }
 
     /*
-        vector<vector<ULong64_t>> Result = {FitInfo, TimeStampRaw, BeamGateRaw, TimeStamp_ns, BeamGate_ns, TimeStamp_ps, BeamGate_ps, EventIndex, EventDeviation_ns, CTCTriggerIndex, CTCTriggerTimeStamp_ns,BeamGate_correction_tick,TimeStamp_correction_tick};
-        vector<ULong64_t> FitInfo = {final_offset_ns, final_offset_ps_negative, gotOrphanCount, gotMin_mean_dev_noOrphan, increament_times, min_mean_dev, final_i, final_j, totalEventNumber};
+        vector<vector<ULong64_t>> Result = {FitInfo, TimeStampRaw, BeamGateRaw, 
+		TimeStamp_ns, BeamGate_ns, TimeStamp_ps, BeamGate_ps, EventIndex, EventDeviation_ns, 
+		CTCTriggerIndex, CTCTriggerTimeStamp_ns, BeamGate_correction_tick, TimeStamp_correction_tick};
+        vector<ULong64_t> FitInfo = {final_offset_ns, final_offset_ps_negative, 
+		gotOrphanCount, gotMin_mean_dev_noOrphan, increament_times, min_mean_dev, final_i, final_j, totalEventNumber};
         vector<ULong64_t> TimeStampRaw;
         vector<ULong64_t> BeamGateRaw;
         vector<ULong64_t> TimeStamp_ns;
@@ -1140,10 +1347,13 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
         vector<ULong64_t> BeamGate_correction_tick;
         vector<ULong64_t> TimeStamp_correction_tick;
     */
+
     // Loop the ResultMap, save the result to a root tree in a root file
-    cout << "Start saving the result to root file and txt file..." << endl;
+    std::cout << "Start saving the result to root file and txt file..." << std::endl;
+
     TFile *fOut = new TFile("offsetFitResult.root", "RECREATE");
     TTree *tOut = new TTree("Events", "Events");
+    
     int runNumber_out;
     int subRunNumber_out;
     int partFileNumber_out;
@@ -1186,7 +1396,6 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
     ULong64_t TS_PPSAfter_tick;
     ULong64_t TS_PPSDiff_tick;
     ULong64_t TS_PPSMissing_tick;
-
     ULong64_t TS_driftCorrection_ns;
     ULong64_t BG_driftCorrection_ns;
 
@@ -1246,8 +1455,10 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
 
         runNumber_out = std::stoi(key.substr(0, key.find("_")));
         subRunNumber_out = std::stoi(key.substr(key.find("_") + 1, key.find("_", key.find("_") + 1) - key.find("_") - 1));
-        partFileNumber_out = std::stoi(key.substr(key.find("_", key.find("_") + 1) + 1, key.find("_", key.find("_", key.find("_") + 1) + 1) - key.find("_", key.find("_") + 1) - 1));
-        LAPPD_ID_out = std::stoi(key.substr(key.find("_", key.find("_", key.find("_") + 1) + 1) + 1, key.size() - key.find("_", key.find("_", key.find("_") + 1) + 1) - 1));
+        partFileNumber_out = std::stoi(key.substr(key.find("_", key.find("_") + 1) + 1, 
+		key.find("_", key.find("_", key.find("_") + 1) + 1) - key.find("_", key.find("_") + 1) - 1));
+        LAPPD_ID_out = std::stoi(key.substr(key.find("_", key.find("_", key.find("_") + 1) + 1) + 1, 
+		key.size() - key.find("_", key.find("_", key.find("_") + 1) + 1) - 1));
         final_offset_ns_0 = Result[0][0];
         final_offset_ns_1 = Result[24][0];
         final_offset_ps_negative_0 = Result[0][1];
@@ -1264,15 +1475,29 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
         drift0 = Result[0][9];
         drift1 = Result[24][9];
 
-        //                                      0           1           2           3           4               5               6           7           8                    9           10                     11                          12                          13                      14              15          16          17          18          19              20          21
-        // vector<vector<ULong64_t>> Result = {FitInfo, TimeStampRaw, BeamGateRaw, TimeStamp_ns, BeamGate_ns, TimeStamp_ps, BeamGate_ps, EventIndex, EventDeviation_ns, CTCTriggerIndex, CTCTriggerTimeStamp_ns, BeamGate_correction_tick, TimeStamp_correction_tick, LAPPD_PPS_interval_ticks, BG_PPSBefore, BG_PPSAfter, BG_PPSDiff, BG_PPSMiss, TS_PPSBefore, TS_PPSAfter, TS_PPSDiff, TS_PPSMiss};
-        // any Result[x] , if x>13, x = x + 8
+        //                                        0         1             2            3             4            5             6           
+	//      7           8                9                10                       11                        12                          
+	//       13                     14            15           16          17          18            19           20          21
+        // vector<vector<ULong64_t>> Result = {FitInfo, TimeStampRaw, BeamGateRaw, TimeStamp_ns, BeamGate_ns, TimeStamp_ps, BeamGate_ps, 
+	// EventIndex, EventDeviation_ns, CTCTriggerIndex, CTCTriggerTimeStamp_ns, BeamGate_correction_tick, TimeStamp_correction_tick, 
+	// LAPPD_PPS_interval_ticks, BG_PPSBefore, BG_PPSAfter, BG_PPSDiff, BG_PPSMiss, TS_PPSBefore, TS_PPSAfter, TS_PPSDiff, TS_PPSMiss};
+
+        // any Result[x] , if x > 13, x = x + 8
         for (int j = 0; j < Result[1].size(); j++)
         {
-            long long BGTdiff = Result[4][j] - Result[10][j] - 325250;
-            // cout<<"BGTDiff: "<<BGTdiff<<endl;
-            // cout<<"Saving BeamGate_ns = "<<Result[4][j]<<", CTCTriggerTimeStamp_ns = "<<Result[10][j]<<", with BG-T-325250= "<<BGTdiff<<", at partFileNumber "<<partFileNumber_out<<", EventIndex = "<<Result[7][j]<<", j = "<<j<<endl;
-            outputEvents << fixed << Result[3][j] << " " << Result[5][j] << " " << Result[4][j] << " " << Result[6][j] << " " << Result[10][j] << " " << BGTdiff << " " << partFileNumber_out << " " << Result[7][j] << " " << Result[11][j] << " " << Result[12][j] << " " << Result[13][j] << " " << Result[22][j] << " " << Result[23][j] << endl;
+	    // 325250 ns is the software delay between CTC UBT and LAPPD Beamgate
+            long long BGTdiff = Result[4][j] - Result[10][j] - 325250; 
+
+            // std::cout << "BGTDiff: " << BGTdiff << std::endl;
+            // std::cout << "Saving BeamGate_ns = " << Result[4][j] << ", CTCTriggerTimeStamp_ns = " << Result[10][j]
+		// << ", with BG-T-325250 = " << BGTdiff << ", at partFileNumber " << partFileNumber_out << ", EventIndex = "
+		// << Result[7][j] << ", j = " << j << std::endl;
+            
+            outputEvents << fixed << Result[3][j] << " " << Result[5][j] << " " << Result[4][j] << " " 
+		<< Result[6][j] << " " << Result[10][j] << " " << BGTdiff << " " << partFileNumber_out 
+		<< " " << Result[7][j] << " " << Result[11][j] << " " << Result[12][j] << " " << Result[13][j] 
+		<< " " << Result[22][j] << " " << Result[23][j] << std::endl;
+            
             EventIndex = Result[7][j];
             TimeStampRaw = Result[1][j];
             BeamGateRaw = Result[2][j];
@@ -1283,7 +1508,7 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
             CTCTriggerIndex = Result[9][j];
             CTCTriggerTimeStamp_ns = Result[10][j];
             EventDeviation_ns_0 = Result[8][j];
-            EventDeviation_ns_1 = Result[28][j];
+            EventDeviation_ns_1 = Result[32][j];
             BGMinusTrigger_ns = BGTdiff;
             BGCorrection_tick = Result[11][j];
             TSCorrection_tick = Result[12][j];
@@ -1300,8 +1525,15 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
             BG_driftCorrection_ns = Result[23][j];
             tOut->Fill();
         }
-        outputOffset << runNumber_out << "\t" << subRunNumber_out << "\t" << partFileNumber_out << "\t" << 0 << "\t" << LAPPD_ID_out << "\t" << final_offset_ns_0 << "\t" << final_offset_ns_1 << "\t" << final_offset_ps_negative_0 << "\t" << final_offset_ps_negative_1 << "\t" << gotOrphanCount_0 << "\t" << gotOrphanCount_1 << "\t" << EventNumberInThisPartFile << "\t" << gotMin_mean_dev_noOrphan_0 << "\t" << gotMin_mean_dev_noOrphan_1 << "\t" << increament_times_0 << "\t" << increament_times_1 << "\t" << min_mean_dev_0 << "\t" << min_mean_dev_1 << std::endl;
+        
+        outputOffset << runNumber_out << "\t" << subRunNumber_out << "\t" << partFileNumber_out << "\t" << 0 
+		<< "\t" << LAPPD_ID_out << "\t" << final_offset_ns_0 << "\t" << final_offset_ns_1 << "\t" 
+		<< final_offset_ps_negative_0 << "\t" << final_offset_ps_negative_1 << "\t" << gotOrphanCount_0 
+		<< "\t" << gotOrphanCount_1 << "\t" << EventNumberInThisPartFile << "\t" << gotMin_mean_dev_noOrphan_0 
+		<< "\t" << gotMin_mean_dev_noOrphan_1 << "\t" << increament_times_0 << "\t" << increament_times_1 
+		<< "\t" << min_mean_dev_0 << "\t" << min_mean_dev_1 << std::endl;
     }
+
     outputOffset.close();
     fOut->cd();
     tOut->Write();

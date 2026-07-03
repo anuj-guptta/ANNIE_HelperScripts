@@ -3,7 +3,7 @@
 
 | Directory 			| Purpose 			| Author 	| Last Updated 			| Status	|
 |-------------------------------|-------------------------------|---------------|-------------------------------|---------------|
-| `cpp/offsetFit_MultipleLAPPD` | LAPPD timing offset fitting	| Yue Feng 	| Anuj Gupta (2026-06-09)	| Ready		|
+| `cpp/offsetFit_MultipleLAPPD` | LAPPD timing offset fitting	| Yue Feng 	| Anuj Gupta (2026-07-03)	| Ready		|
 
 
 
