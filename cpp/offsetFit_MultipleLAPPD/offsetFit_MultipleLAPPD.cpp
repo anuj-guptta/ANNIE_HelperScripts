@@ -4,7 +4,7 @@ Script Name     : offsetFit_MultipleLAPPD.cpp
 Author          : Yue Feng
 Created On      : N/A
 Updated By      : Anuj Gupta
-Last Updated    : 2026-07-03
+Last Updated    : 2026-09-07
 
 Purpose         : The script performs LAPPD timing offset fitting and timing corrections.
                   Detailed procedure is described in README.md
@@ -12,7 +12,7 @@ Purpose         : The script performs LAPPD timing offset fitting and timing cor
 Inputs          : It takes 5 arguments as input.
                   filename: LAPPDTree.root, fitTargetTriggerWord, triggerGrouped, intervalInSeconds, processPfNumber
 
-Outputs         : Produces offsetFitResult.root (used during Event Building)
+Outputs         : Produces offsetFitResult.root (used during Event Building in LAPPDLoadStore tool)
                   Other outputs: offsetFit.txt, outputEvents.txt
 
 Usage           : root -l -q 'offsetFit_MultipleLAPPD.cpp("LAPPDTree.root", 14, 1, 10, 0)' // for beam runs
@@ -44,6 +44,7 @@ vector<vector<ULong64_t>> fitInThisReset(
     const std::vector<ULong64_t> &CTCPPS,
     const ULong64_t PPSDeltaT, // here, pre-scale is in units ps
     const int partFileNumber,
+    const int LAPPD_ID,
     const int ACDCNumber)
 {
     std::cout << "***************************************" << endl;
@@ -94,8 +95,11 @@ vector<vector<ULong64_t>> fitInThisReset(
 		    << ", PPSDeltaT - diff = " << (PPSDeltaT - diff) / 1E6 << std::endl;
         }
     }
-    
-    TH1D *h = new TH1D("h", "h", 1000, 0, 1E3);
+   
+    // Create a mathematically UNIQUE name for the histogram
+    TString hName = TString::Format("h_PF%d_LAPPD%d_ACDC%d", partFileNumber, LAPPD_ID, ACDCNumber);
+    TH1D *h = new TH1D(hName, hName, 1000, 0, 1E3);
+
     for (size_t i = 0; i < PPSInterval_ACDC.size(); i++)
     {
         // only fill the drift histogram if there is a drift > 2 microseconds
@@ -107,13 +111,19 @@ vector<vector<ULong64_t>> fitInThisReset(
         }
     }
 
-    TF1 *gausf = new TF1("gausf", "gaus", 0, 1E3);
+    // Create a mathematically UNIQUE name for the fit function
+    TString fName = TString::Format("gausf_PF%d_LAPPD%d_ACDC%d", partFileNumber, LAPPD_ID, ACDCNumber);
+    TF1 *gausf = new TF1(fName, "gaus", 0, 1E3);
+
+    // Perform the fit
     h->Fit(gausf, "Q"); // Q for quiet mode
     
     ULong64_t drift = static_cast<ULong64_t>(gausf->GetParameter(1) * 1E6); // drift in ps
     ULong64_t trueInterval = PPSDeltaT - drift;
     std::cout << "Gaussian Drift in ps is " << drift << std::endl;
     std::cout << "True PPS interval in ps is " << trueInterval << std::endl;
+    
+    // Delete objects to avoid memory leak  
     delete gausf;
     delete h;
 
@@ -303,7 +313,6 @@ vector<vector<ULong64_t>> fitInThisReset(
             if (diffSum.size() > 0)
                 mean_dev = mean_dev / diffSum.size();
         
-
             double mean_dev_noOrphan = 0;
             int pairedCount = 0;
             for (int k = 0; k < notOrphanIndex.size(); k++)
@@ -317,9 +326,10 @@ vector<vector<ULong64_t>> fitInThisReset(
 		
 		if (fitTargetTriggerWord == 14)
     		{
-        		if (diffSum[idx] > 322E3 && diffSum[idx] < 326E3)
+                        if (diffSum[idx] > 322E3 && diffSum[idx] < 326E3)
         		{
-            			mean_dev_noOrphan += diffSum[idx];
+            		
+				mean_dev_noOrphan += diffSum[idx];
             			pairedCount += 1;
         		}
     		}
@@ -328,6 +338,7 @@ vector<vector<ULong64_t>> fitInThisReset(
 			pairedCount += 1;
 		}
             }
+            
             if (pairedCount != 0)
             {
                 mean_dev_noOrphan = mean_dev_noOrphan / pairedCount;
@@ -343,13 +354,11 @@ vector<vector<ULong64_t>> fitInThisReset(
             // The mean_dev can't be larger than 1 s because the beam spill is 15Hz.
             // So, a good match will give a large number of events in desired range on integer level, minus the mean _dev.
             // By selecting the largest quality Number, for matchs with the same matched beamgate, smaller mean_dev is better.
-            double qualityNumber = pairedCount*1e9 - mean_dev; 
-            bool debug = false;
-            if (debug)
+            double qualityNumber = pairedCount*1e9 - mean_dev;
+
+            bool debug_print = false;
+            if (debug_print)
             {            
-		std::cout << "LAPPD PPS " << i << "= " << LAPPD_PPS.at(i) << " ps, CTC PPS " << j << " = "<< CTCPPS.at(j) << ", mean_dev = " << mean_dev << std::endl;
-		std::cout << "pairedCount = " << pairedCount << ", orphanCount = " << orphanCount << ", qualityNumber = " << qualityNumber << std::endl;
-		
 		// print all diffSum
 		std::cout << "diffSum: ";
                 for (const auto &diff : diffSum)
@@ -478,6 +487,20 @@ vector<vector<ULong64_t>> fitInThisReset(
     cout << "\033[1;34m*** Final mean deviation is \033[1;31m" << min_mean_dev << "\033[1;34m ns\033[0m" << endl;
     cout << "\033[1;34m*** Final PPS index is \033[1;31m" << final_i << "\033[1;34m, in total of \033[1;31m" << LAPPD_PPS.size() << "\033[0m" << endl;
     cout << "\033[1;34m*** Final CTC PPS index is \033[1;31m" << final_j << "\033[1;34m, in total of \033[1;31m" << CTCPPS.size() << "\033[0m" << endl;
+    
+    std::cout << "ACDC " << ACDCNumber << " matched CTC triggers: ";
+    for (auto x : final_ctcPairedIndex)
+        std::cout << x << " ";
+
+    std::cout << std::endl;
+    std::cout << "Final_i = " << final_i
+          << "   LAPPD_PPS = " << LAPPD_PPS.at(final_i)
+          << std::endl;
+
+    std::cout << "Final_j = " << final_j
+          << "   CTC_PPS = " << CTCPPS.at(final_j)
+          << std::endl;
+
     cout << "\033[1;34m***************************\033[0m" << endl;
     cout << "\033[1;34m******* Saving *************\033[0m" << endl;
 
@@ -959,8 +982,10 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
 
     vector<ULong64_t> LAPPD_PPS0;
     vector<ULong64_t> LAPPD_PPS1;
-    vector<ULong64_t> LAPPDDataTimeStampUL;
-    vector<ULong64_t> LAPPDDataBeamgateUL;
+    vector<ULong64_t> LAPPDDataTimeStamp0_UL;
+    vector<ULong64_t> LAPPDDataBeamgate0_UL;
+    vector<ULong64_t> LAPPDDataTimeStamp1_UL;
+    vector<ULong64_t> LAPPDDataBeamgate1_UL;
 
     vector<ULong64_t> CTCTargetTimeStamp;
     vector<ULong64_t> CTCPPSTimeStamp;
@@ -972,12 +997,10 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
 
     ULong64_t ppsTime0;
     ULong64_t ppsTime1;
-    ULong64_t LAPPDTimeStampUL;
-    ULong64_t LAPPDBeamgateUL;
-    ULong64_t LAPPDDataTimestamp;
-    ULong64_t LAPPDDataBeamgate;
-    // double LAPPDDataTimestampFloat;
-    // double LAPPDDataBeamgateFloat;
+    ULong64_t LAPPDTimeStamp0_UL;
+    ULong64_t LAPPDBeamgate0_UL;
+    ULong64_t LAPPDTimeStamp1_UL;
+    ULong64_t LAPPDBeamgate1_UL;
 
     vector<uint32_t> *CTCTriggerWord = nullptr;
     ULong64_t CTCTimeStamp;
@@ -988,12 +1011,10 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     lappdTree->SetBranchAddress("SubRunNumber", &subRunNumber_inTree);
     lappdTree->SetBranchAddress("PartFileNumber", &partFileNumber_inTree);
     lappdTree->SetBranchAddress("LAPPD_ID", &LAPPD_ID_inTree);
-    lappdTree->SetBranchAddress("LAPPDDataTimeStampUL", &LAPPDTimeStampUL);
-    lappdTree->SetBranchAddress("LAPPDDataBeamgateUL", &LAPPDBeamgateUL);
-    lappdTree->SetBranchAddress("LAPPDDataTimestamp", &LAPPDDataTimestamp);
-    lappdTree->SetBranchAddress("LAPPDDataBeamgate", &LAPPDDataBeamgate);
-    // lappdTree->SetBranchAddress("LAPPDDataTimestampFloat", &LAPPDDataTimestampFloat);
-    // lappdTree->SetBranchAddress("LAPPDDataBeamgateFloat", &LAPPDDataBeamgateFloat);
+    lappdTree->SetBranchAddress("LAPPDDataTimeStamp0_UL", &LAPPDTimeStamp0_UL);
+    lappdTree->SetBranchAddress("LAPPDDataBeamgate0_UL", &LAPPDBeamgate0_UL);
+    lappdTree->SetBranchAddress("LAPPDDataTimeStamp1_UL", &LAPPDTimeStamp1_UL);
+    lappdTree->SetBranchAddress("LAPPDDataBeamgate1_UL", &LAPPDBeamgate1_UL);
     lappdTree->SetBranchAddress("ppsTime0", &ppsTime0);
     lappdTree->SetBranchAddress("ppsTime1", &ppsTime1);
 
@@ -1024,54 +1045,59 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     {
         lappdTree->GetEntry(i);
         
-        // if(i<100)
-        // std::cout << "LAPPD_ID_inTree: " << LAPPD_ID_inTree << ", runNumber_inTree: " << runNumber_inTree 
-		// << ", subRunNumber_inTree: " << subRunNumber_inTree << ", partFileNumber_inTree: " << partFileNumber_inTree << std::endl;
-        // std::cout << "LAPPD_ID: " << LAPPD_ID << ", runNumber: " << runNumber << ", subRunNumber: " << subRunNumber 
-		// << ", partFileNumber: " << partFileNumber << std::endl;
-
 	// 1000 / 8 * 25 = 3125
         if (LAPPD_ID_inTree == LAPPD_ID && runNumber_inTree == runNumber && subRunNumber_inTree == subRunNumber && partFileNumber_inTree == partFileNumber)
         {
-            if (LAPPDTimeStampUL != 0)
+            // Define boolean flags for readability
+            bool hasData0 = (LAPPDTimeStamp0_UL != 0);
+            bool hasData1 = (LAPPDTimeStamp1_UL != 0);
+
+            // --- 1. Handle Data Events (Strict Coincidence) ---
+            if (hasData0 && hasData1)
             {
-                std::cout << "In unit of 1ps, after conversion and saving, LAPPDTimeStampUL: " << LAPPDTimeStampUL * 3125 
-			<< ", LAPPDBeamgateUL: " << LAPPDBeamgateUL * 3125 << std::endl;
-                std::cout << "In second, use double, Timestamp: " << static_cast<double>(LAPPDTimeStampUL * 3125) / 1E12 
-			<< ", Beamgate: " << static_cast<double>(LAPPDBeamgateUL * 3125) / 1E12 << std::endl;
-
-                LAPPDDataTimeStampUL.push_back(LAPPDTimeStampUL * 3125);
-                LAPPDDataBeamgateUL.push_back(LAPPDBeamgateUL * 3125);
-
-                /*
-                std::cout << "LAPPDDataTimestamp: " << LAPPDDataTimestamp << ", LAPPDDataBeamgate: " << LAPPDDataBeamgate << std::endl;
-                std::cout << "LAPPDDataTimestampFloat: " << LAPPDDataTimestampFloat << ", LAPPDDataBeamgateFloat: " << LAPPDDataBeamgateFloat << std::endl;
+                // Both boards have valid data. Safe to push!
                 
-                ULong64_t ULTS = LAPPDTimeStampUL*1000/8*25;
-                double DTS = static_cast<double>(LAPPDDataTimestamp);
-                double plusDTS = DTS + LAPPDDataTimestampFloat;
-                ULong64_t ULBG = LAPPDBeamgateUL*1000/8*25;
-                double DBG = static_cast<double>(LAPPDDataBeamgate);
-                double plusDBG = DBG + LAPPDDataBeamgateFloat;
-
-                std::cout << std::fixed << " ULTS: " << ULTS << ", DTS: " << DTS << ", plusDTS: " << plusDTS << std::endl;
-                std::cout << std::fixed << " ULBG: " << ULBG << ", DBG: " << DBG << ", plusDBG: " << plusDBG << std::endl;
-                std::cout << std::endl;
-                */
+                std::cout << "In unit of ps, after conversion and saving, LAPPDTimeStamp0_UL: " << LAPPDTimeStamp0_UL * 3125 
+			<< ", LAPPDBeamgate0_UL: " << LAPPDBeamgate0_UL * 3125 << std::endl;
+                std::cout << "In second, use double, Timestamp0: " << static_cast<double>(LAPPDTimeStamp0_UL * 3125) / 1E12 
+			<< ", Beamgate0: " << static_cast<double>(LAPPDBeamgate0_UL * 3125) / 1E12 << std::endl;
+               
+                 
+                std::cout << "In unit of ps, after conversion and saving, LAPPDTimeStamp1_UL: " << LAPPDTimeStamp1_UL * 3125 
+			<< ", LAPPDBeamgate1_UL: " << LAPPDBeamgate1_UL * 3125 << std::endl;
+                std::cout << "In second, use double, Timestamp1: " << static_cast<double>(LAPPDTimeStamp1_UL * 3125) / 1E12 
+			<< ", Beamgate1: " << static_cast<double>(LAPPDBeamgate1_UL * 3125) / 1E12 << std::endl;
+                
+                LAPPDDataTimeStamp0_UL.push_back(LAPPDTimeStamp0_UL * 3125);
+                LAPPDDataBeamgate0_UL.push_back(LAPPDBeamgate0_UL * 3125);
+                
+                LAPPDDataTimeStamp1_UL.push_back(LAPPDTimeStamp1_UL * 3125);
+                LAPPDDataBeamgate1_UL.push_back(LAPPDBeamgate1_UL * 3125);
             }
-            else if (LAPPDTimeStampUL == 0)
+            else if (hasData0 || hasData1)
             {
-                // std::cout << "ppsTime0: " << ppsTime0 << ", ppsTime1: " << ppsTime1 << std::endl;
-                
+                // Mismatch: One board fired, the other did not.
+                // We drop the event to keep the vectors perfectly parallel.
+                std::cout << "Warning: Mismatched data at tree index " << i 
+                          << ". Dropping event to maintain ACDC alignment." << std::endl;
+            }
+
+            // --- 2. Handle PPS Heartbeats Independently ---
+            if (!hasData0)
+            {
                 if (LAPPD_PPS0.size() == 0)
                     LAPPD_PPS0.push_back(ppsTime0 * 3125);
-                if (LAPPD_PPS1.size() == 0)
-                    LAPPD_PPS1.push_back(ppsTime1 * 3125);
-                if (LAPPD_PPS0.size() > 0 && ppsTime0 * 3125 != LAPPD_PPS0.at(LAPPD_PPS0.size() - 1))
+                else if (ppsTime0 * 3125 != LAPPD_PPS0.at(LAPPD_PPS0.size() - 1))
                     LAPPD_PPS0.push_back(ppsTime0 * 3125);
                 else
                     repeatedPPSNumber0 += 1;
-                if (LAPPD_PPS1.size() > 0 && ppsTime1 * 3125 != LAPPD_PPS1.at(LAPPD_PPS1.size() - 1))
+            }
+            
+            if (!hasData1)
+            {
+                if (LAPPD_PPS1.size() == 0)
+                    LAPPD_PPS1.push_back(ppsTime1 * 3125);    
+                else if (ppsTime1 * 3125 != LAPPD_PPS1.at(LAPPD_PPS1.size() - 1))
                     LAPPD_PPS1.push_back(ppsTime1 * 3125);
                 else
                     repeatedPPSNumber1 += 1;
@@ -1116,24 +1142,31 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     }
     
     std::cout << "Vector for partfile " << partFileNumber << " for LAPPD ID " << LAPPD_ID << " loaded." << std::endl;
-    std::cout << "LAPPDDataTimeStampUL in ps size: " << LAPPDDataTimeStampUL.size() << std::endl;
-    std::cout << "LAPPDDataBeamgateUL in ps size: " << LAPPDDataBeamgateUL.size() << std::endl;
+    std::cout << "LAPPDDataTimeStamp0_UL in ps size: " << LAPPDDataTimeStamp0_UL.size() << std::endl;
+    std::cout << "LAPPDDataTimeStamp1_UL in ps size: " << LAPPDDataTimeStamp1_UL.size() << std::endl;
+    std::cout << "LAPPDDataBeamgate0_UL in ps size: " << LAPPDDataBeamgate0_UL.size() << std::endl;
+    std::cout << "LAPPDDataBeamgate1_UL in ps size: " << LAPPDDataBeamgate1_UL.size() << std::endl;
     std::cout << "LAPPD_PPS0 size: " << LAPPD_PPS0.size() << std::endl;
     std::cout << "LAPPD_PPS1 size: " << LAPPD_PPS1.size() << std::endl;
     std::cout << "CTCTargetTimeStamp size: " << CTCTargetTimeStamp.size() << std::endl;
     std::cout << "CTCPPSTimeStamp size: " << CTCPPSTimeStamp.size() << std::endl;
    
-    // 5. Find the number of resets in LAPPD PPS:
-    int LAPPDDataFitStopIndex = 0;
-    int resetNumber = 0;
+    // 5. Find the number of resets in LAPPD PPS: 
     
-    // First check if there is a reset, if not, set the LAPPDDataFitStopIndex to the size of LAPPDDataTimeStampUL
-    // If all PPS in this part file was incremented, then there is no reset
+    // Initialize the fit stop index to the last valid timestamp index.
+    // If no reset is found, the full timestamp vector will be used.
+    int LAPPDDataFitStopIndex0 = LAPPDDataTimeStamp0_UL.size() - 1;
+    int LAPPDDataFitStopIndex1 = LAPPDDataTimeStamp1_UL.size() - 1;
+    int resetNumber0 = 0;
+    int resetNumber1 = 0;
+  
+    // Check ACDC 0 and ACDC 1 independently for a PPS reset. 
+    // If all PPS in this part file are increasing, then there is no reset
     for (int i = 1; i < LAPPD_PPS0.size(); i++)
     {
         if (LAPPD_PPS0[i] < LAPPD_PPS0[i - 1])
         {
-            resetNumber += 1;
+            resetNumber0 += 1;
             std::cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber 
 		<< ", part file number " << partFileNumber << ", reset " << " found at PPS_ACDC0 index " << i << std::endl;
             break;
@@ -1143,26 +1176,42 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     {
         if (LAPPD_PPS1[i] < LAPPD_PPS1[i - 1])
         {
-            resetNumber += 1;
+            resetNumber1 += 1;
             std::cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber 
 		<< ", part file number " << partFileNumber << ", reset " << " found at PPS_ACDC1 index " << i << std::endl;
             break;
         }
     }
 
-    if (resetNumber == 0) {
+    if (resetNumber0 == 0) {
         std::cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber 
-		<< ", part file number " << partFileNumber << ", no reset found." << std::endl;
+		<< ", part file number " << partFileNumber << ", no reset found for ACDC 0." << std::endl;
+    }
+    if (resetNumber1 == 0) {
+        std::cout << "For LAPPD ID " << LAPPD_ID << ", run number " << runNumber << ", sub run number " << subRunNumber 
+		<< ", part file number " << partFileNumber << ", no reset found for ACDC 1." << std::endl;
     }
 
-    // If reset found, loop the timestamp in order to find the LAPPDDataFitStopIndex
-    if (resetNumber != 0)
+    // If a reset is found, determine the fit stop index separately for each ACDC.
+    if (resetNumber0 != 0)
     {
-        for (int i = 1; i < LAPPDDataTimeStampUL.size(); i++)
+        for (int i = 1; i < LAPPDDataTimeStamp0_UL.size(); i++)
         {
-            if (LAPPDDataTimeStampUL[i] < LAPPDDataTimeStampUL[i - 1])
+            if (LAPPDDataTimeStamp0_UL[i] < LAPPDDataTimeStamp0_UL[i - 1])
             {
-                LAPPDDataFitStopIndex = i - 1;
+                LAPPDDataFitStopIndex0 = i - 1;
+                break;
+            }
+        }
+        // TODO: extend this to later offsets
+    }
+    if (resetNumber1 != 0)
+    {
+        for (int i = 1; i < LAPPDDataTimeStamp1_UL.size(); i++)
+        {
+            if (LAPPDDataTimeStamp1_UL[i] < LAPPDDataTimeStamp1_UL[i - 1])
+            {
+                LAPPDDataFitStopIndex1 = i - 1;
                 break;
             }
         }
@@ -1171,9 +1220,23 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     
     // 6. Use the target trigger word to fit the offset
     // TODO: Fit for each reset
+    // Note by Anuj Gupta: I have checked all of the PPS Timestamps for runs <= 5668 and no reset has been observed.
 
     vector<vector<ULong64_t>> ResultTotal;
-    if (LAPPDDataTimeStampUL.size() == LAPPDDataBeamgateUL.size())
+
+    // Sanity checks for timing vector sizes across ACDCs
+    if (LAPPDDataTimeStamp0_UL.size() != LAPPDDataTimeStamp1_UL.size()) {
+        std::cout << "Warning: ACDC 0 and ACDC 1 timestamp vector sizes differ: " << LAPPDDataTimeStamp0_UL.size() << " vs "<< LAPPDDataTimeStamp1_UL.size() << std::endl;
+    }
+    if (LAPPDDataBeamgate0_UL.size() != LAPPDDataBeamgate1_UL.size()) {
+        std::cout << "Warning: ACDC 0 and ACDC 1 beamgate vector sizes differ: " << LAPPDDataBeamgate0_UL.size() << " vs "<< LAPPDDataBeamgate1_UL.size() << std::endl;
+    }
+    if (LAPPD_PPS0.size() != LAPPD_PPS1.size()) {
+        std::cout << "Warning: ACDC 0 and ACDC 1 PPS vector sizes differ: " << LAPPD_PPS0.size() << " vs " << LAPPD_PPS1.size() << std::endl;
+    }
+
+    if (LAPPDDataTimeStamp0_UL.size() == LAPPDDataBeamgate0_UL.size() && 
+        LAPPDDataTimeStamp1_UL.size() == LAPPDDataBeamgate1_UL.size())
     {
         if (LAPPD_PPS0.size() == 0 || LAPPD_PPS1.size() == 0)
         {
@@ -1181,10 +1244,10 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
             return ResultTotal;
         }
 
-        vector<vector<ULong64_t>> ResultACDC0 = fitInThisReset(LAPPDDataTimeStampUL, LAPPDDataBeamgateUL, LAPPD_PPS0, fitTargetTriggerWord, 
-		CTCTargetTimeStamp, CTCPPSTimeStamp, static_cast<ULong64_t>(intervalInSecond) * 1000000000000ULL, partFileNumber, 0);
-        vector<vector<ULong64_t>> ResultACDC1 = fitInThisReset(LAPPDDataTimeStampUL, LAPPDDataBeamgateUL, LAPPD_PPS1, fitTargetTriggerWord, 
-		CTCTargetTimeStamp, CTCPPSTimeStamp, static_cast<ULong64_t>(intervalInSecond) * 1000000000000ULL, partFileNumber, 1);
+        vector<vector<ULong64_t>> ResultACDC0 = fitInThisReset(LAPPDDataTimeStamp0_UL, LAPPDDataBeamgate0_UL, LAPPD_PPS0, fitTargetTriggerWord, 
+		CTCTargetTimeStamp, CTCPPSTimeStamp, static_cast<ULong64_t>(intervalInSecond) * 1000000000000ULL, partFileNumber, LAPPD_ID, 0);
+        vector<vector<ULong64_t>> ResultACDC1 = fitInThisReset(LAPPDDataTimeStamp1_UL, LAPPDDataBeamgate1_UL, LAPPD_PPS1, fitTargetTriggerWord, 
+		CTCTargetTimeStamp, CTCPPSTimeStamp, static_cast<ULong64_t>(intervalInSecond) * 1000000000000ULL, partFileNumber, LAPPD_ID, 1);
 
         // 7. Save the offset for this LAPPD ID, run number, part file number, index and reset number.
         std::cout << "Fitting in part file " << partFileNumber << " for LAPPD ID " << LAPPD_ID << " done." << std::endl;
@@ -1204,6 +1267,9 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
 
 void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool triggerGrouped, int intervalInSecond, int processPFNumber)
 {
+
+    TH1::AddDirectory(kFALSE);
+
     // 1. Load LAPPDTree.root
     const string file = fileName;
     TFile *f = new TFile(file.c_str(), "READ");
@@ -1238,15 +1304,15 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
                  << "\t"
                  << "gotOrphanCount_ACDC1"
                  << "\t"
-                 << "EventNumInThisPartFile"
+                 << "n_beamgates"
                  << "\t"
                  << "min_mean_dev_noOrphan_ACDC0"
                  << "\t"
                  << "min_mean_dev_noOrphan_ACDC1"
                  << "\t"
-                 << "increament_times_ACDC0"
+                 << "increment_times_ACDC0"
                  << "\t"
-                 << "increament_times_ACDC1"
+                 << "increment_times_ACDC1"
                  << "\t"
                  << "min_mean_dev_ACDC0"
                  << "\t"
@@ -1328,26 +1394,6 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
         pfNumber++;
     }
 
-    /*
-        vector<vector<ULong64_t>> Result = {FitInfo, TimeStampRaw, BeamGateRaw, 
-		TimeStamp_ns, BeamGate_ns, TimeStamp_ps, BeamGate_ps, EventIndex, EventDeviation_ns, 
-		CTCTriggerIndex, CTCTriggerTimeStamp_ns, BeamGate_correction_tick, TimeStamp_correction_tick};
-        vector<ULong64_t> FitInfo = {final_offset_ns, final_offset_ps_negative, 
-		gotOrphanCount, gotMin_mean_dev_noOrphan, increament_times, min_mean_dev, final_i, final_j, totalEventNumber};
-        vector<ULong64_t> TimeStampRaw;
-        vector<ULong64_t> BeamGateRaw;
-        vector<ULong64_t> TimeStamp_ns;
-        vector<ULong64_t> BeamGate_ns;
-        vector<ULong64_t> TimeStamp_ps;
-        vector<ULong64_t> BeamGate_ps;
-        vector<ULong64_t> EventIndex;
-        vector<ULong64_t> EventDeviation_ns;
-        vector<ULong64_t> CTCTriggerIndex;
-        vector<ULong64_t> CTCTriggerTimeStamp_ns;
-        vector<ULong64_t> BeamGate_correction_tick;
-        vector<ULong64_t> TimeStamp_correction_tick;
-    */
-
     // Loop the ResultMap, save the result to a root tree in a root file
     std::cout << "Start saving the result to root file and txt file..." << std::endl;
 
@@ -1359,7 +1405,7 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
     int partFileNumber_out;
     int LAPPD_ID_out;
     ULong64_t EventIndex;
-    ULong64_t EventNumberInThisPartFile;
+    ULong64_t EventNumberInThisPartFile; 
     ULong64_t final_offset_ns_0;
     ULong64_t final_offset_ns_1;
     ULong64_t final_offset_ps_negative_0;
@@ -1376,35 +1422,35 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
     ULong64_t min_mean_dev_1;
     ULong64_t TimeStampRaw;
     ULong64_t BeamGateRaw;
-    ULong64_t TimeStamp_ns;
-    ULong64_t BeamGate_ns;
-    ULong64_t TimeStamp_ps;
-    ULong64_t BeamGate_ps;
+    ULong64_t TimeStamp_ns_0, TimeStamp_ns_1;
+    ULong64_t BeamGate_ns_0, BeamGate_ns_1;
+    ULong64_t TimeStamp_ps_0, TimeStamp_ps_1;
+    ULong64_t BeamGate_ps_0, BeamGate_ps_1;
     ULong64_t EventDeviation_ns_0;
     ULong64_t EventDeviation_ns_1;
-    ULong64_t CTCTriggerIndex;
-    ULong64_t CTCTriggerTimeStamp_ns;
-    long long BGMinusTrigger_ns;
-    long long BGCorrection_tick;
-    long long TSCorrection_tick;
-    ULong64_t LAPPD_PPS_interval_ticks;
-    ULong64_t BG_PPSBefore_tick;
-    ULong64_t BG_PPSAfter_tick;
-    ULong64_t BG_PPSDiff_tick;
-    ULong64_t BG_PPSMissing_tick;
-    ULong64_t TS_PPSBefore_tick;
-    ULong64_t TS_PPSAfter_tick;
-    ULong64_t TS_PPSDiff_tick;
-    ULong64_t TS_PPSMissing_tick;
-    ULong64_t TS_driftCorrection_ns;
-    ULong64_t BG_driftCorrection_ns;
+    ULong64_t CTCTriggerIndex_0, CTCTriggerIndex_1;
+    ULong64_t CTCTriggerTimeStamp_ns_0, CTCTriggerTimeStamp_ns_1;
+    long long BGMinusTrigger_ns_0, BGMinusTrigger_ns_1;
+    long long BGCorrection_tick_0, BGCorrection_tick_1;
+    long long TSCorrection_tick_0, TSCorrection_tick_1;
+    ULong64_t LAPPD_PPS_interval_ticks_0, LAPPD_PPS_interval_ticks_1;
+    ULong64_t BG_PPSBefore_tick_0, BG_PPSBefore_tick_1;
+    ULong64_t BG_PPSAfter_tick_0, BG_PPSAfter_tick_1;
+    ULong64_t BG_PPSDiff_tick_0, BG_PPSDiff_tick_1;
+    ULong64_t BG_PPSMissing_tick_0, BG_PPSMissing_tick_1;
+    ULong64_t TS_PPSBefore_tick_0, TS_PPSBefore_tick_1;
+    ULong64_t TS_PPSAfter_tick_0, TS_PPSAfter_tick_1;
+    ULong64_t TS_PPSDiff_tick_0, TS_PPSDiff_tick_1;
+    ULong64_t TS_PPSMissing_tick_0, TS_PPSMissing_tick_1;
+    ULong64_t TS_driftCorrection_ns_0, TS_driftCorrection_ns_1;
+    ULong64_t BG_driftCorrection_ns_0, BG_driftCorrection_ns_1;
 
     tOut->Branch("runNumber", &runNumber_out, "runNumber/I");
     tOut->Branch("subRunNumber", &subRunNumber_out, "subRunNumber/I");
     tOut->Branch("partFileNumber", &partFileNumber_out, "partFileNumber/I");
     tOut->Branch("LAPPD_ID", &LAPPD_ID_out, "LAPPD_ID/I");
     tOut->Branch("EventIndex", &EventIndex, "EventIndex/l");
-    tOut->Branch("EventNumInThisPF", &EventNumberInThisPartFile, "EventNumInThisPF/l");
+    tOut->Branch("n_beamgates", &EventNumberInThisPartFile, "n_beamgates/l");
     tOut->Branch("final_offset_ns_0", &final_offset_ns_0, "final_offset_ns_0/l");
     tOut->Branch("final_offset_ns_1", &final_offset_ns_1, "final_offset_ns_1/l");
     tOut->Branch("final_offset_ps_negative_0", &final_offset_ps_negative_0, "final_offset_ps_negative_0/l");
@@ -1421,28 +1467,48 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
     tOut->Branch("min_mean_dev_1", &min_mean_dev_1, "min_mean_dev_1/l");
     tOut->Branch("TimeStampRaw", &TimeStampRaw, "TimeStampRaw/l");
     tOut->Branch("BeamGateRaw", &BeamGateRaw, "BeamGateRaw/l");
-    tOut->Branch("TimeStamp_ns", &TimeStamp_ns, "TimeStamp_ns/l");
-    tOut->Branch("BeamGate_ns", &BeamGate_ns, "BeamGate_ns/l");
-    tOut->Branch("TimeStamp_ps", &TimeStamp_ps, "TimeStamp_ps/l");
-    tOut->Branch("BeamGate_ps", &BeamGate_ps, "BeamGate_ps/l");
+    tOut->Branch("TimeStamp_ns_0", &TimeStamp_ns_0, "TimeStamp_ns_0/l");
+    tOut->Branch("TimeStamp_ns_1", &TimeStamp_ns_1, "TimeStamp_ns_1/l");
+    tOut->Branch("BeamGate_ns_0", &BeamGate_ns_0, "BeamGate_ns_0/l");
+    tOut->Branch("BeamGate_ns_1", &BeamGate_ns_1, "BeamGate_ns_1/l");
+    tOut->Branch("TimeStamp_ps_0", &TimeStamp_ps_0, "TimeStamp_ps_0/l");
+    tOut->Branch("TimeStamp_ps_1", &TimeStamp_ps_1, "TimeStamp_ps_1/l");
+    tOut->Branch("BeamGate_ps_0", &BeamGate_ps_0, "BeamGate_ps_0/l");
+    tOut->Branch("BeamGate_ps_1", &BeamGate_ps_1, "BeamGate_ps_1/l");
     tOut->Branch("EventDeviation_ns_0", &EventDeviation_ns_0, "EventDeviation_ns_0/l");
     tOut->Branch("EventDeviation_ns_1", &EventDeviation_ns_1, "EventDeviation_ns_1/l");
-    tOut->Branch("CTCTriggerIndex", &CTCTriggerIndex, "CTCTriggerIndex/l");
-    tOut->Branch("CTCTriggerTimeStamp_ns", &CTCTriggerTimeStamp_ns, "CTCTriggerTimeStamp_ns/l");
-    tOut->Branch("BGMinusTrigger_ns", &BGMinusTrigger_ns, "BGMinusTrigger_ns/L");
-    tOut->Branch("BGCorrection_tick", &BGCorrection_tick, "BGCorrection_tick/l");
-    tOut->Branch("TSCorrection_tick", &TSCorrection_tick, "TSCorrection_tick/l");
-    tOut->Branch("LAPPD_PPS_interval_ticks", &LAPPD_PPS_interval_ticks, "LAPPD_PPS_interval_ticks/l");
-    tOut->Branch("BG_PPSBefore_tick", &BG_PPSBefore_tick, "BG_PPSBefore_tick/l");
-    tOut->Branch("BG_PPSAfter_tick", &BG_PPSAfter_tick, "BG_PPSAfter_tick/l");
-    tOut->Branch("BG_PPSDiff_tick", &BG_PPSDiff_tick, "BG_PPSDiff_tick/l");
-    tOut->Branch("BG_PPSMissing_tick", &BG_PPSMissing_tick, "BG_PPSMissing_tick/l");
-    tOut->Branch("TS_PPSBefore_tick", &TS_PPSBefore_tick, "TS_PPSBefore_tick/l");
-    tOut->Branch("TS_PPSAfter_tick", &TS_PPSAfter_tick, "TS_PPSAfter_tick/l");
-    tOut->Branch("TS_PPSDiff_tick", &TS_PPSDiff_tick, "TS_PPSDiff_tick/l");
-    tOut->Branch("TS_PPSMissing_tick", &TS_PPSMissing_tick, "TS_PPSMissing_tick/l");
-    tOut->Branch("TS_driftCorrection_ns", &TS_driftCorrection_ns, "TS_driftCorrection_ns/l");
-    tOut->Branch("BG_driftCorrection_ns", &BG_driftCorrection_ns, "BG_driftCorrection_ns/l");
+    tOut->Branch("CTCTriggerIndex_0", &CTCTriggerIndex_0, "CTCTriggerIndex_0/l");
+    tOut->Branch("CTCTriggerIndex_1", &CTCTriggerIndex_1, "CTCTriggerIndex_1/l");
+    tOut->Branch("CTCTriggerTimeStamp_ns_0", &CTCTriggerTimeStamp_ns_0, "CTCTriggerTimeStamp_ns_0/l");
+    tOut->Branch("CTCTriggerTimeStamp_ns_1", &CTCTriggerTimeStamp_ns_1, "CTCTriggerTimeStamp_ns_1/l");
+    tOut->Branch("BGMinusTrigger_ns_0", &BGMinusTrigger_ns_0, "BGMinusTrigger_ns_0/L");
+    tOut->Branch("BGMinusTrigger_ns_1", &BGMinusTrigger_ns_1, "BGMinusTrigger_ns_1/L");
+    tOut->Branch("BGCorrection_tick_0", &BGCorrection_tick_0, "BGCorrection_tick_0/l");
+    tOut->Branch("BGCorrection_tick_1", &BGCorrection_tick_1, "BGCorrection_tick_1/l");
+    tOut->Branch("TSCorrection_tick_0", &TSCorrection_tick_0, "TSCorrection_tick_0/l");
+    tOut->Branch("TSCorrection_tick_1", &TSCorrection_tick_1, "TSCorrection_tick_1/l");
+    tOut->Branch("LAPPD_PPS_interval_ticks_0", &LAPPD_PPS_interval_ticks_0, "LAPPD_PPS_interval_ticks_0/l");
+    tOut->Branch("LAPPD_PPS_interval_ticks_1", &LAPPD_PPS_interval_ticks_1, "LAPPD_PPS_interval_ticks_1/l");
+    tOut->Branch("BG_PPSBefore_tick_0", &BG_PPSBefore_tick_0, "BG_PPSBefore_tick_0/l");
+    tOut->Branch("BG_PPSBefore_tick_1", &BG_PPSBefore_tick_1, "BG_PPSBefore_tick_1/l");
+    tOut->Branch("BG_PPSAfter_tick_0", &BG_PPSAfter_tick_0, "BG_PPSAfter_tick_0/l");
+    tOut->Branch("BG_PPSAfter_tick_1", &BG_PPSAfter_tick_1, "BG_PPSAfter_tick_1/l");
+    tOut->Branch("BG_PPSDiff_tick_0", &BG_PPSDiff_tick_0, "BG_PPSDiff_tick_0/l");
+    tOut->Branch("BG_PPSDiff_tick_1", &BG_PPSDiff_tick_1, "BG_PPSDiff_tick_1/l");
+    tOut->Branch("BG_PPSMissing_tick_0", &BG_PPSMissing_tick_0, "BG_PPSMissing_tick_0/l");
+    tOut->Branch("BG_PPSMissing_tick_1", &BG_PPSMissing_tick_1, "BG_PPSMissing_tick_1/l");
+    tOut->Branch("TS_PPSBefore_tick_0", &TS_PPSBefore_tick_0, "TS_PPSBefore_tick_0/l");
+    tOut->Branch("TS_PPSBefore_tick_1", &TS_PPSBefore_tick_1, "TS_PPSBefore_tick_1/l");
+    tOut->Branch("TS_PPSAfter_tick_0", &TS_PPSAfter_tick_0, "TS_PPSAfter_tick_0/l");
+    tOut->Branch("TS_PPSAfter_tick_1", &TS_PPSAfter_tick_1, "TS_PPSAfter_tick_1/l");
+    tOut->Branch("TS_PPSDiff_tick_0", &TS_PPSDiff_tick_0, "TS_PPSDiff_tick_0/l");
+    tOut->Branch("TS_PPSDiff_tick_1", &TS_PPSDiff_tick_1, "TS_PPSDiff_tick_1/l");
+    tOut->Branch("TS_PPSMissing_tick_0", &TS_PPSMissing_tick_0, "TS_PPSMissing_tick_0/l");
+    tOut->Branch("TS_PPSMissing_tick_1", &TS_PPSMissing_tick_1, "TS_PPSMissing_tick_1/l");
+    tOut->Branch("TS_driftCorrection_ns_0", &TS_driftCorrection_ns_0, "TS_driftCorrection_ns_0/l");
+    tOut->Branch("TS_driftCorrection_ns_1", &TS_driftCorrection_ns_1, "TS_driftCorrection_ns_1/l");
+    tOut->Branch("BG_driftCorrection_ns_0", &BG_driftCorrection_ns_0, "BG_driftCorrection_ns_0/l");
+    tOut->Branch("BG_driftCorrection_ns_1", &BG_driftCorrection_ns_1, "BG_driftCorrection_ns_1/l");
     
     std::ofstream outputEvents("outputEvents.txt");
     for (auto it = ResultMap.begin(); it != ResultMap.end(); it++)
@@ -1459,6 +1525,13 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
 		key.find("_", key.find("_", key.find("_") + 1) + 1) - key.find("_", key.find("_") + 1) - 1));
         LAPPD_ID_out = std::stoi(key.substr(key.find("_", key.find("_", key.find("_") + 1) + 1) + 1, 
 		key.size() - key.find("_", key.find("_", key.find("_") + 1) + 1) - 1));
+        
+        if (Result.size() < 48) {
+            std::cerr << "Unexpected Result size = " << Result.size()
+                  << " for key " << key << std::endl;
+            continue;
+        }
+
         final_offset_ns_0 = Result[0][0];
         final_offset_ns_1 = Result[24][0];
         final_offset_ps_negative_0 = Result[0][1];
@@ -1486,7 +1559,8 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
         for (int j = 0; j < Result[1].size(); j++)
         {
 	    // 325250 ns is the software delay between CTC UBT and LAPPD Beamgate
-            long long BGTdiff = Result[4][j] - Result[10][j] - 325250; 
+            long long BGTdiff_0 = Result[4][j] - Result[10][j] - 325250; 
+            long long BGTdiff_1 = Result[28][j] - Result[34][j] - 325250;
 
             // std::cout << "BGTDiff: " << BGTdiff << std::endl;
             // std::cout << "Saving BeamGate_ns = " << Result[4][j] << ", CTCTriggerTimeStamp_ns = " << Result[10][j]
@@ -1494,35 +1568,60 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
 		// << Result[7][j] << ", j = " << j << std::endl;
             
             outputEvents << fixed << Result[3][j] << " " << Result[5][j] << " " << Result[4][j] << " " 
-		<< Result[6][j] << " " << Result[10][j] << " " << BGTdiff << " " << partFileNumber_out 
+		<< Result[6][j] << " " << Result[10][j] << " " << BGTdiff_0 << " " << partFileNumber_out 
 		<< " " << Result[7][j] << " " << Result[11][j] << " " << Result[12][j] << " " << Result[13][j] 
 		<< " " << Result[22][j] << " " << Result[23][j] << std::endl;
             
             EventIndex = Result[7][j];
             TimeStampRaw = Result[1][j];
             BeamGateRaw = Result[2][j];
-            TimeStamp_ns = Result[3][j];
-            BeamGate_ns = Result[4][j];
-            TimeStamp_ps = Result[5][j];
-            BeamGate_ps = Result[6][j];
-            CTCTriggerIndex = Result[9][j];
-            CTCTriggerTimeStamp_ns = Result[10][j];
-            EventDeviation_ns_0 = Result[8][j];
-            EventDeviation_ns_1 = Result[32][j];
-            BGMinusTrigger_ns = BGTdiff;
-            BGCorrection_tick = Result[11][j];
-            TSCorrection_tick = Result[12][j];
-            LAPPD_PPS_interval_ticks = Result[13][j];
-            BG_PPSBefore_tick = Result[14][j];
-            BG_PPSAfter_tick = Result[15][j];
-            BG_PPSDiff_tick = Result[16][j];
-            BG_PPSMissing_tick = Result[17][j];
-            TS_PPSBefore_tick = Result[18][j];
-            TS_PPSAfter_tick = Result[19][j];
-            TS_PPSDiff_tick = Result[20][j];
-            TS_PPSMissing_tick = Result[21][j];
-            TS_driftCorrection_ns = Result[22][j];
-            BG_driftCorrection_ns = Result[23][j];
+
+            // --- Saving ACDC0 offsets ---
+            TimeStamp_ns_0              = Result[3][j];
+            BeamGate_ns_0               = Result[4][j];
+            TimeStamp_ps_0              = Result[5][j];
+            BeamGate_ps_0               = Result[6][j];
+            CTCTriggerIndex_0           = Result[9][j];
+            CTCTriggerTimeStamp_ns_0    = Result[10][j];
+            EventDeviation_ns_0         = Result[8][j];
+            BGMinusTrigger_ns_0         = BGTdiff_0;
+            BGCorrection_tick_0         = Result[11][j];
+            TSCorrection_tick_0         = Result[12][j];
+            LAPPD_PPS_interval_ticks_0  = Result[13][j];
+            BG_PPSBefore_tick_0         = Result[14][j];
+            BG_PPSAfter_tick_0          = Result[15][j];
+            BG_PPSDiff_tick_0           = Result[16][j];
+            BG_PPSMissing_tick_0        = Result[17][j];
+            TS_PPSBefore_tick_0         = Result[18][j];
+            TS_PPSAfter_tick_0          = Result[19][j];
+            TS_PPSDiff_tick_0           = Result[20][j];
+            TS_PPSMissing_tick_0        = Result[21][j];
+            TS_driftCorrection_ns_0     = Result[22][j];
+            BG_driftCorrection_ns_0     = Result[23][j];
+
+            // --- Saving ACDC1 offsets ---
+            TimeStamp_ns_1              = Result[27][j];
+            BeamGate_ns_1               = Result[28][j];
+            TimeStamp_ps_1              = Result[29][j];
+            BeamGate_ps_1               = Result[30][j];
+            CTCTriggerIndex_1           = Result[33][j];
+            CTCTriggerTimeStamp_ns_1    = Result[34][j];
+            EventDeviation_ns_1         = Result[32][j];
+            BGMinusTrigger_ns_1         = BGTdiff_1;
+            BGCorrection_tick_1         = Result[35][j];
+            TSCorrection_tick_1         = Result[36][j];
+            LAPPD_PPS_interval_ticks_1  = Result[37][j];
+            BG_PPSBefore_tick_1         = Result[38][j];
+            BG_PPSAfter_tick_1          = Result[39][j];
+            BG_PPSDiff_tick_1           = Result[40][j];
+            BG_PPSMissing_tick_1        = Result[41][j];
+            TS_PPSBefore_tick_1         = Result[42][j];
+            TS_PPSAfter_tick_1          = Result[43][j];
+            TS_PPSDiff_tick_1           = Result[44][j];
+            TS_PPSMissing_tick_1        = Result[45][j];
+            TS_driftCorrection_ns_1     = Result[46][j];
+            BG_driftCorrection_ns_1     = Result[47][j];
+
             tOut->Fill();
         }
         
