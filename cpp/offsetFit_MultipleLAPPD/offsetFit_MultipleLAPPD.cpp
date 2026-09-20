@@ -4,7 +4,7 @@ Script Name     : offsetFit_MultipleLAPPD.cpp
 Author          : Yue Feng
 Created On      : N/A
 Updated By      : Anuj Gupta
-Last Updated    : 2026-09-07
+Last Updated    : 2026-09-19
 
 Purpose         : The script performs LAPPD timing offset fitting and timing corrections.
                   Detailed procedure is described in README.md
@@ -1420,8 +1420,8 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
     ULong64_t increament_times_1;
     ULong64_t min_mean_dev_0;
     ULong64_t min_mean_dev_1;
-    ULong64_t TimeStampRaw;
-    ULong64_t BeamGateRaw;
+    ULong64_t TimeStampRaw_0, TimeStampRaw_1;
+    ULong64_t BeamGateRaw_0, BeamGateRaw_1;
     ULong64_t TimeStamp_ns_0, TimeStamp_ns_1;
     ULong64_t BeamGate_ns_0, BeamGate_ns_1;
     ULong64_t TimeStamp_ps_0, TimeStamp_ps_1;
@@ -1465,8 +1465,10 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
     tOut->Branch("increament_times_1", &increament_times_1, "increament_times_1/l");
     tOut->Branch("min_mean_dev_0", &min_mean_dev_0, "min_mean_dev_0/l");
     tOut->Branch("min_mean_dev_1", &min_mean_dev_1, "min_mean_dev_1/l");
-    tOut->Branch("TimeStampRaw", &TimeStampRaw, "TimeStampRaw/l");
-    tOut->Branch("BeamGateRaw", &BeamGateRaw, "BeamGateRaw/l");
+    tOut->Branch("TimeStampRaw_0", &TimeStampRaw_0, "TimeStampRaw_0/l");
+    tOut->Branch("TimeStampRaw_1", &TimeStampRaw_1, "TimeStampRaw_1/l");
+    tOut->Branch("BeamGateRaw_0", &BeamGateRaw_0, "BeamGateRaw_0/l");
+    tOut->Branch("BeamGateRaw_1", &BeamGateRaw_1, "BeamGateRaw_1/l");
     tOut->Branch("TimeStamp_ns_0", &TimeStamp_ns_0, "TimeStamp_ns_0/l");
     tOut->Branch("TimeStamp_ns_1", &TimeStamp_ns_1, "TimeStamp_ns_1/l");
     tOut->Branch("BeamGate_ns_0", &BeamGate_ns_0, "BeamGate_ns_0/l");
@@ -1573,10 +1575,10 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
 		<< " " << Result[22][j] << " " << Result[23][j] << std::endl;
             
             EventIndex = Result[7][j];
-            TimeStampRaw = Result[1][j];
-            BeamGateRaw = Result[2][j];
 
             // --- Saving ACDC0 offsets ---
+            TimeStampRaw_0              = Result[1][j];
+            BeamGateRaw_0               = Result[2][j];
             TimeStamp_ns_0              = Result[3][j];
             BeamGate_ns_0               = Result[4][j];
             TimeStamp_ps_0              = Result[5][j];
@@ -1599,7 +1601,9 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
             TS_driftCorrection_ns_0     = Result[22][j];
             BG_driftCorrection_ns_0     = Result[23][j];
 
-            // --- Saving ACDC1 offsets ---
+            // --- Saving ACDC1 offsets --- 
+            TimeStampRaw_1              = Result[25][j];
+            BeamGateRaw_1               = Result[26][j];
             TimeStamp_ns_1              = Result[27][j];
             BeamGate_ns_1               = Result[28][j];
             TimeStamp_ps_1              = Result[29][j];
