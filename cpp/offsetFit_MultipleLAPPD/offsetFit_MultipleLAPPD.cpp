@@ -4,7 +4,7 @@ Script Name     : offsetFit_MultipleLAPPD.cpp
 Author          : Yue Feng
 Created On      : N/A
 Updated By      : Anuj Gupta
-Last Updated    : 2026-09-19
+Last Updated    : 2026-10-06
 
 Purpose         : The script performs LAPPD timing offset fitting and timing corrections.
                   Detailed procedure is described in README.md
@@ -63,6 +63,10 @@ vector<vector<ULong64_t>> fitInThisReset(
     	// 1. Check the drift
     	// 2. Shift the timestamp and beamgate based on drift
     	// 3. Fit the offset
+
+    const double BEAM_MATCH_MIN_NS    = 322E3;   // 322 us, beam trigger min
+    const double BEAM_MATCH_MAX_NS    = 326E3;   // 326 us, beam trigger max
+    const double DEFAULT_MATCH_MAX_NS = 100E3;   // 100 us, laser trigger
 
     std::vector<double> PPSInterval_ACDC;
     for (size_t i = 1; i < LAPPD_PPS.size(); i++)
@@ -276,11 +280,11 @@ vector<vector<ULong64_t>> fitInThisReset(
 			// <<" ps, CTCTrigger[" << minPairIndex << "] = " << CTCTrigger[minPairIndex] << " ns, minMatchDiff = " << minMatchDiff << " ns" << std::endl;
                     
 		    double minAllowedDiff = 0;
-                    double maxAllowedDiff = 100E3;
+                    double maxAllowedDiff = DEFAULT_MATCH_MAX_NS;
                     if (fitTargetTriggerWord == 14)
                     {
-                        minAllowedDiff = 322E3;
-                        maxAllowedDiff = 326E3;
+                        minAllowedDiff = BEAM_MATCH_MIN_NS;
+                        maxAllowedDiff = BEAM_MATCH_MAX_NS;
                     }
                     if (minMatchDiff > maxAllowedDiff || minMatchDiff < minAllowedDiff)
                     {
@@ -326,7 +330,7 @@ vector<vector<ULong64_t>> fitInThisReset(
 		
 		if (fitTargetTriggerWord == 14)
     		{
-                        if (diffSum[idx] > 322E3 && diffSum[idx] < 326E3)
+                        if (diffSum[idx] > BEAM_MATCH_MIN_NS && diffSum[idx] < BEAM_MATCH_MAX_NS)
         		{
             		
 				mean_dev_noOrphan += diffSum[idx];
@@ -966,6 +970,14 @@ vector<vector<ULong64_t>> fitInThisReset(
     vector<ULong64_t> FitInfo = {final_offset_ns, final_offset_ps_negative, gotOrphanCount_out, gotMin_mean_dev_noOrphan_out, 
 	increament_times_out, min_mean_dev_out, final_i_out, final_j_out, totalEventNumber, drift_out};
 
+    // NOTE: Anuj Gupta (2026.10.06)
+    // LAPPD_PPS_interval_ticks (Result[13]) has one entry per PPS, not per beamgate.
+    // It is correct for the internal tick correction above, but when written out per beamgate
+    // (outputEvents.txt column 11, branch LAPPD_PPS_interval_ticks_0/1) it is meaningless,
+    // and past the PPS count it reads beyond the vector end (garbage, changes run to run).
+    // Not used anywhere in downstream tools (not read by LAPPDLoadStore). 
+    // Use BG_PPSDiff_tick for the per-event PPS gap.
+   
     vector<vector<ULong64_t>> Result = {FitInfo, TimeStampRaw, BeamGateRaw, TimeStamp_ns, BeamGate_ns, TimeStamp_ps, BeamGate_ps, 
 	EventIndex, EventDeviation_ns, CTCTriggerIndex, CTCTriggerTimeStamp_ns, BeamGate_correction_tick, TimeStamp_correction_tick, 
 	LAPPD_PPS_interval_ticks, BG_PPSBefore, BG_PPSAfter, BG_PPSDiff, BG_PPSMiss, TS_PPSBefore, TS_PPSAfter, TS_PPSDiff, TS_PPSMiss, 
@@ -1083,7 +1095,7 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
             }
 
             // --- 2. Handle PPS Heartbeats Independently ---
-            if (!hasData0)
+            if (!hasData0 && ppsTime0 != 0)
             {
                 if (LAPPD_PPS0.size() == 0)
                     LAPPD_PPS0.push_back(ppsTime0 * 3125);
@@ -1093,7 +1105,7 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
                     repeatedPPSNumber0 += 1;
             }
             
-            if (!hasData1)
+            if (!hasData1 && ppsTime1 != 0)
             {
                 if (LAPPD_PPS1.size() == 0)
                     LAPPD_PPS1.push_back(ppsTime1 * 3125);    
@@ -1238,9 +1250,12 @@ vector<vector<ULong64_t>> fitInPartFile(TTree *lappdTree, TTree *triggerTree, in
     if (LAPPDDataTimeStamp0_UL.size() == LAPPDDataBeamgate0_UL.size() && 
         LAPPDDataTimeStamp1_UL.size() == LAPPDDataBeamgate1_UL.size())
     {
-        if (LAPPD_PPS0.size() == 0 || LAPPD_PPS1.size() == 0)
+        if (LAPPD_PPS0.empty() || LAPPD_PPS1.empty() ||
+            LAPPDDataTimeStamp0_UL.empty() || LAPPDDataTimeStamp1_UL.empty() ||
+            CTCTargetTimeStamp.empty() || CTCPPSTimeStamp.empty())
         {
-            std::cout << "Error: PPS0 or PPS1 is empty, return empty result." << std::endl;
+            std::cout << "Error: empty PPS/data/CTC vector in part file " << partFileNumber
+              << " for LAPPD ID " << LAPPD_ID << ", skip this part file." << std::endl;
             return ResultTotal;
         }
 
@@ -1560,9 +1575,9 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
         // any Result[x] , if x > 13, x = x + 8
         for (int j = 0; j < Result[1].size(); j++)
         {
-	    // 325250 ns is the software delay between CTC UBT and LAPPD Beamgate
-            long long BGTdiff_0 = Result[4][j] - Result[10][j] - 325250; 
-            long long BGTdiff_1 = Result[28][j] - Result[34][j] - 325250;
+            const long long CTC_TO_LAPPD_BEAMGATE_DELAY_NS = 325250; // software delay between CTC UBT and LAPPD beamgate
+            long long BGTdiff_0 = Result[4][j] - Result[10][j] - CTC_TO_LAPPD_BEAMGATE_DELAY_NS;
+            long long BGTdiff_1 = Result[28][j] - Result[34][j] - CTC_TO_LAPPD_BEAMGATE_DELAY_NS;
 
             // std::cout << "BGTDiff: " << BGTdiff << std::endl;
             // std::cout << "Saving BeamGate_ns = " << Result[4][j] << ", CTCTriggerTimeStamp_ns = " << Result[10][j]
@@ -1589,6 +1604,8 @@ void offsetFit_MultipleLAPPD(string fileName, int fitTargetTriggerWord, bool tri
             BGMinusTrigger_ns_0         = BGTdiff_0;
             BGCorrection_tick_0         = Result[11][j];
             TSCorrection_tick_0         = Result[12][j];
+            // NOTE: LAPPD_PPS_interval_ticks_0/1 is NOT a valid per-event value - do not use in any downstream tool.
+            // See note above the Result vector in fitInThisReset().
             LAPPD_PPS_interval_ticks_0  = Result[13][j];
             BG_PPSBefore_tick_0         = Result[14][j];
             BG_PPSAfter_tick_0          = Result[15][j];
